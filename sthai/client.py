@@ -154,14 +154,14 @@ def _check_dimensions(model: EmbeddingModel | str, dimensions: int | None) -> No
         warnings.warn(
             f"dimensions={dimensions} exceeds the native {params.dimensions} "
             f"dimensions of '{model}'",
-            stacklevel=3,
+            stacklevel=4,
         )
     elif params.dimensions % dimensions != 0:
         warnings.warn(
             f"dimensions={dimensions} does not divide evenly into the native "
             f"{params.dimensions} dimensions of '{model}'; use a power-of-two "
             f"divisor (e.g. {params.dimensions // 2}, {params.dimensions // 4})",
-            stacklevel=3,
+            stacklevel=4,
         )
 
 
@@ -175,9 +175,12 @@ def _float_embedding(embedding: list[float] | str) -> list[float]:
     return embedding
 
 
-class Client:
+class _BaseClient:
     """
-    The main client class for interacting with the SthAI API.
+    Shared configuration, state, and request/response plumbing for Client
+    and AsyncClient. Builders turn public-method arguments into request
+    structs and finishers turn HTTP responses into decoded values; only the
+    transport in between differs between the sync and async subclasses.
     """
 
     def __init__(
@@ -208,17 +211,6 @@ class Client:
         self._chat_history: list[ChatMessage] = []
         self._last_response: InferenceResponse | None = None
 
-    def healthy(self) -> bool:
-        """Check the server's health status."""
-        response = self._make_request(HttpMethod.GET, HEALTH_ENDPOINT)
-        return response.ok
-
-    def models(self) -> list[ModelCard]:
-        """List the models available on the server."""
-        response = self._make_request(HttpMethod.GET, MODELS_ENDPOINT)
-        response.raise_for_status()
-        return msgspec.json.decode(response.content or b"", type=ModelList).data
-
     def clear_history(self) -> None:
         """Discard the stored chat history."""
         self._chat_history = []
@@ -233,26 +225,22 @@ class Client:
             return None
         return self._last_response.output().reasoning
 
-    def chat(
+    def _build_chat_request(
         self,
         prompt: str,
         *,
-        model: InferenceModel | str = InferenceModel.QWEN_3_6_27B,
-        max_tokens: int | None = None,
-        temperature: float | None = None,
-        use_thinking: bool = False,
-        system_prompt: str | None = None,
-        image_urls: list[str] | None = None,
-        image_files: list[Path | bytes] | None = None,
-        use_history: bool = True,
-    ) -> InferenceResponse:
+        model: InferenceModel | str,
+        max_tokens: int | None,
+        temperature: float | None,
+        use_thinking: bool,
+        system_prompt: str | None,
+        image_urls: list[str] | None,
+        image_files: list[Path | bytes] | None,
+        use_history: bool,
+    ) -> tuple[InferenceRequest, UserMessage]:
         """
-        Send a chat message and return the full inference response.
-
-        With write_history=True (the default), each successful call appends
-        the user and assistant turns to the stored history, and later calls
-        send that history. Pass use_history=False for a standalone call that
-        neither sends nor updates it.
+        Build a chat() request body, returned along with the user message so
+        the caller can record it into history once the response succeeds.
         """
         user_message = UserMessage(
             content=_prompt_content(prompt, image_urls, image_files)
@@ -275,8 +263,15 @@ class Client:
             temperature=temperature if temperature is not None else UNSET,
             chat_template_kwargs={"enable_thinking": use_thinking},
         )
-        decoded = self._inference_request(body)
+        return body, user_message
 
+    def _record_chat_turns(
+        self,
+        user_message: UserMessage,
+        decoded: InferenceResponse,
+        use_history: bool,
+    ) -> None:
+        """Record a successful chat exchange into the stored history."""
         # A call that didn't see the history must not write to it either,
         # or the stored conversation would gain a turn with missing context
         if use_history and self._write_history and decoded.choices:
@@ -284,6 +279,266 @@ class Client:
             self._chat_history.append(
                 AssistantMessage(content=decoded.choices[0].message.content)
             )
+
+    def _build_response_request(
+        self,
+        prompt: str,
+        *,
+        response_type: type | None,
+        model: InferenceModel | str,
+        max_tokens: int | None,
+        temperature: float | None,
+        use_thinking: bool,
+        system_prompt: str | None,
+        image_urls: list[str] | None,
+        image_files: list[Path | bytes] | None,
+    ) -> InferenceRequest:
+        """Build a response() request body (history is never included)."""
+        messages: list[ChatMessage] = []
+        if system_prompt:
+            messages.append(SystemMessage(content=system_prompt))
+        messages.append(
+            UserMessage(content=_prompt_content(prompt, image_urls, image_files))
+        )
+
+        return InferenceRequest(
+            messages=messages,
+            model=model,
+            max_completion_tokens=max_tokens if max_tokens is not None else UNSET,
+            temperature=temperature if temperature is not None else UNSET,
+            chat_template_kwargs={"enable_thinking": use_thinking},
+            response_format=(
+                _response_format(response_type) if response_type is not None else UNSET
+            ),
+        )
+
+    def _build_embed_request(
+        self,
+        text: str | None,
+        *,
+        model: EmbeddingModel | str,
+        query: bool,
+        instruction: str | None,
+        image_urls: list[str] | None,
+        image_files: list[Path | bytes] | None,
+        dimensions: int | None,
+    ) -> EmbeddingChatRequest:
+        """Build an embed() request body, validating the inputs."""
+        image_parts = _build_image_parts(image_urls, image_files)
+        parts: list[ContentPart] = []
+        # An empty string is treated as no text: embedding it would produce a
+        # meaningless vector, so it falls through to the guard below instead
+        if text:
+            parts.append(TextContent(text=text))
+        parts.extend(image_parts)
+        if not parts:
+            raise ValueError("embed() requires text and/or images")
+        _check_dimensions(model, dimensions)
+        content: str | list[ContentPart] = text if text and not image_parts else parts
+
+        if instruction is None:
+            instruction = _default_instruction(model, query)
+        messages: list[ChatMessage] = []
+        if instruction is not None:
+            messages.append(SystemMessage(content=instruction))
+        messages.append(UserMessage(content=content))
+        # The open assistant turn is intentional: with continue_final_message
+        # the template is left unterminated, matching how the model was
+        # trained to embed
+        messages.append(AssistantMessage(content=""))
+
+        return EmbeddingChatRequest(
+            messages=messages,
+            model=model,
+            encoding_format="float",
+            dimensions=dimensions if dimensions is not None else UNSET,
+            continue_final_message=True,
+            # True (not the chat-form server default of False) so tokenization
+            # matches batch_embed's plain-input form, which defaults to True
+            add_special_tokens=True,
+        )
+
+    def _build_batch_embed_request(
+        self,
+        texts: list[str],
+        *,
+        model: EmbeddingModel | str,
+        query: bool,
+        instruction: str | None,
+        template: str | None,
+        dimensions: int | None,
+    ) -> EmbeddingCompletionRequest:
+        """Build a batch_embed() request body, rendering the local template."""
+        if not texts:
+            raise ValueError("batch_embed() requires at least one text")
+        if not all(texts):
+            raise ValueError("batch_embed() texts must be non-empty strings")
+        if template is None:
+            params = EMBEDDING_PARAMS.get(model)
+            template = params.template if params is not None else None
+            if template is None:
+                raise ValueError(
+                    f"no known embedding template for model '{model}'; pass "
+                    'template= (use "{text}" for models that take raw '
+                    "untemplated input)"
+                )
+        if "{instruction}" not in template and (instruction is not None or query):
+            warnings.warn(
+                "the template has no {instruction} placeholder, so the requested "
+                "instruction steering will not be applied",
+                stacklevel=3,
+            )
+        if instruction is None:
+            instruction = _default_instruction(model, query)
+            if instruction is None and "{instruction}" in template:
+                raise ValueError(
+                    f"no known embedding instruction for model '{model}' but "
+                    "the template expects one; pass instruction="
+                )
+        _check_dimensions(model, dimensions)
+        try:
+            inputs = [
+                template.format(instruction=instruction, text=text) for text in texts
+            ]
+        except (KeyError, IndexError) as exc:
+            raise ValueError(
+                "template must use only the {instruction} and {text} "
+                "placeholders; escape literal braces as {{ and }}"
+            ) from exc
+        return EmbeddingCompletionRequest(
+            input=inputs,
+            model=model,
+            encoding_format="float",
+            dimensions=dimensions if dimensions is not None else UNSET,
+        )
+
+    def _build_rerank_request(
+        self,
+        query: str | ScoreMultiModalParam,
+        documents: Sequence[str | ScoreMultiModalParam],
+        *,
+        model: RerankingModel | str,
+        top_n: int | None,
+        instruction: str | None,
+    ) -> RerankRequest:
+        """Build a rerank() request body, validating the inputs."""
+        if not documents:
+            raise ValueError("rerank() requires at least one document")
+        if top_n is not None and top_n < 1:
+            raise ValueError("top_n must be a positive integer")
+
+        return RerankRequest(
+            query=query,
+            documents=list(documents),
+            top_n=top_n if top_n is not None else UNSET,
+            model=model,
+            instruction=instruction if instruction is not None else UNSET,
+        )
+
+    def _finish_models(self, response: Response) -> list[ModelCard]:
+        """Decode a model-list response."""
+        response.raise_for_status()
+        return msgspec.json.decode(response.content or b"", type=ModelList).data
+
+    def _finish_inference(self, response: Response) -> InferenceResponse:
+        """Decode an inference response and record it as the last response."""
+        response.raise_for_status()
+        decoded = msgspec.json.decode(response.content or b"", type=InferenceResponse)
+        self._last_response = decoded
+        return decoded
+
+    def _finish_embedding(self, response: Response) -> EmbeddingResponse:
+        """Decode an embedding response."""
+        response.raise_for_status()
+        return msgspec.json.decode(response.content or b"", type=EmbeddingResponse)
+
+    def _extract_single_embedding(self, decoded: EmbeddingResponse) -> list[float]:
+        """The single float vector from an embed() response."""
+        outputs = decoded.output()
+        if not outputs:
+            raise ValueError("server returned no embedding data")
+        return _float_embedding(outputs[0])
+
+    def _extract_batch_embeddings(
+        self, decoded: EmbeddingResponse
+    ) -> list[list[float]]:
+        """One float vector per input text from a batch_embed() response."""
+        return [_float_embedding(embedding) for embedding in decoded.output()]
+
+    def _finish_rerank(self, response: Response) -> list[RerankResult]:
+        """Decode a rerank response into its result list."""
+        response.raise_for_status()
+        decoded = msgspec.json.decode(response.content or b"", type=RerankResponse)
+        return decoded.results
+
+    def _server_url(self) -> str:
+        """The server's base URL."""
+        scheme = "https" if self.secure else "http"
+        return f"{scheme}://{self.fqdn}"
+
+    def _endpoint_url(self, endpoint: str) -> str:
+        """The absolute URL for an endpoint path."""
+        if not endpoint.startswith("/"):
+            endpoint = f"/{endpoint}"
+        return f"{self._server_url()}{endpoint}"
+
+    def _default_headers(self) -> dict[str, str]:
+        """The auth (and session pin) headers sent with every request."""
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+        if self._session_pin:
+            headers[SESSION_PIN_HEADER] = self._session_pin
+        return headers
+
+
+class Client(_BaseClient):
+    """
+    The main client class for interacting with the SthAI API.
+    """
+
+    def healthy(self) -> bool:
+        """Check the server's health status."""
+        response = self._make_request(HttpMethod.GET, HEALTH_ENDPOINT)
+        return response.ok
+
+    def models(self) -> list[ModelCard]:
+        """List the models available on the server."""
+        response = self._make_request(HttpMethod.GET, MODELS_ENDPOINT)
+        return self._finish_models(response)
+
+    def chat(
+        self,
+        prompt: str,
+        *,
+        model: InferenceModel | str = InferenceModel.QWEN_3_6_27B,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        use_thinking: bool = False,
+        system_prompt: str | None = None,
+        image_urls: list[str] | None = None,
+        image_files: list[Path | bytes] | None = None,
+        use_history: bool = True,
+    ) -> InferenceResponse:
+        """
+        Send a chat message and return the full inference response.
+
+        With write_history=True (the default), each successful call appends
+        the user and assistant turns to the stored history, and later calls
+        send that history. Pass use_history=False for a standalone call that
+        neither sends nor updates it.
+        """
+        body, user_message = self._build_chat_request(
+            prompt,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            use_thinking=use_thinking,
+            system_prompt=system_prompt,
+            image_urls=image_urls,
+            image_files=image_files,
+            use_history=use_history,
+        )
+        decoded = self._inference_request(body)
+        self._record_chat_turns(user_message, decoded, use_history)
         return decoded
 
     def response(
@@ -315,22 +570,16 @@ class Client:
         server occasionally skips the schema when thinking is enabled;
         parsing then raises a ValueError - retry, or disable thinking.
         """
-        messages: list[ChatMessage] = []
-        if system_prompt:
-            messages.append(SystemMessage(content=system_prompt))
-        messages.append(
-            UserMessage(content=_prompt_content(prompt, image_urls, image_files))
-        )
-
-        body = InferenceRequest(
-            messages=messages,
+        body = self._build_response_request(
+            prompt,
+            response_type=response_type,
             model=model,
-            max_completion_tokens=max_tokens if max_tokens is not None else UNSET,
-            temperature=temperature if temperature is not None else UNSET,
-            chat_template_kwargs={"enable_thinking": use_thinking},
-            response_format=(
-                _response_format(response_type) if response_type is not None else UNSET
-            ),
+            max_tokens=max_tokens,
+            temperature=temperature,
+            use_thinking=use_thinking,
+            system_prompt=system_prompt,
+            image_urls=image_urls,
+            image_files=image_files,
         )
         decoded = self._inference_request(body)
         if response_type is None:
@@ -345,10 +594,7 @@ class Client:
             data=msgspec.json.encode(body),
             headers={"Content-Type": "application/json"},
         )
-        response.raise_for_status()
-        decoded = msgspec.json.decode(response.content or b"", type=InferenceResponse)
-        self._last_response = decoded
-        return decoded
+        return self._finish_inference(response)
 
     def embed(
         self,
@@ -374,44 +620,17 @@ class Client:
         truncates the vector server-side (Matryoshka); powers of two work
         best, up to the model's native dimension.
         """
-        image_parts = _build_image_parts(image_urls, image_files)
-        parts: list[ContentPart] = []
-        # An empty string is treated as no text: embedding it would produce a
-        # meaningless vector, so it falls through to the guard below instead
-        if text:
-            parts.append(TextContent(text=text))
-        parts.extend(image_parts)
-        if not parts:
-            raise ValueError("embed() requires text and/or images")
-        _check_dimensions(model, dimensions)
-        content: str | list[ContentPart] = text if text and not image_parts else parts
-
-        if instruction is None:
-            instruction = _default_instruction(model, query)
-        messages: list[ChatMessage] = []
-        if instruction is not None:
-            messages.append(SystemMessage(content=instruction))
-        messages.append(UserMessage(content=content))
-        # The open assistant turn is intentional: with continue_final_message
-        # the template is left unterminated, matching how the model was
-        # trained to embed
-        messages.append(AssistantMessage(content=""))
-
-        body = EmbeddingChatRequest(
-            messages=messages,
+        body = self._build_embed_request(
+            text,
             model=model,
-            encoding_format="float",
-            dimensions=dimensions if dimensions is not None else UNSET,
-            continue_final_message=True,
-            # True (not the chat-form server default of False) so tokenization
-            # matches batch_embed's plain-input form, which defaults to True
-            add_special_tokens=True,
+            query=query,
+            instruction=instruction,
+            image_urls=image_urls,
+            image_files=image_files,
+            dimensions=dimensions,
         )
         decoded = self._embedding_request(body)
-        outputs = decoded.output()
-        if not outputs:
-            raise ValueError("server returned no embedding data")
-        return _float_embedding(outputs[0])
+        return self._extract_single_embedding(decoded)
 
     def batch_embed(
         self,
@@ -436,50 +655,16 @@ class Client:
         {instruction} and {text} placeholders - "{text}" alone for raw
         untemplated input. dimensions truncates the vectors server-side.
         """
-        if not texts:
-            raise ValueError("batch_embed() requires at least one text")
-        if not all(texts):
-            raise ValueError("batch_embed() texts must be non-empty strings")
-        if template is None:
-            params = EMBEDDING_PARAMS.get(model)
-            template = params.template if params is not None else None
-            if template is None:
-                raise ValueError(
-                    f"no known embedding template for model '{model}'; pass "
-                    'template= (use "{text}" for models that take raw '
-                    "untemplated input)"
-                )
-        if "{instruction}" not in template and (instruction is not None or query):
-            warnings.warn(
-                "the template has no {instruction} placeholder, so the requested "
-                "instruction steering will not be applied",
-                stacklevel=2,
-            )
-        if instruction is None:
-            instruction = _default_instruction(model, query)
-            if instruction is None and "{instruction}" in template:
-                raise ValueError(
-                    f"no known embedding instruction for model '{model}' but "
-                    "the template expects one; pass instruction="
-                )
-        _check_dimensions(model, dimensions)
-        try:
-            inputs = [
-                template.format(instruction=instruction, text=text) for text in texts
-            ]
-        except (KeyError, IndexError) as exc:
-            raise ValueError(
-                "template must use only the {instruction} and {text} "
-                "placeholders; escape literal braces as {{ and }}"
-            ) from exc
-        body = EmbeddingCompletionRequest(
-            input=inputs,
+        body = self._build_batch_embed_request(
+            texts,
             model=model,
-            encoding_format="float",
-            dimensions=dimensions if dimensions is not None else UNSET,
+            query=query,
+            instruction=instruction,
+            template=template,
+            dimensions=dimensions,
         )
         decoded = self._embedding_request(body)
-        return [_float_embedding(embedding) for embedding in decoded.output()]
+        return self._extract_batch_embeddings(decoded)
 
     def _embedding_request(
         self, body: EmbeddingChatRequest | EmbeddingCompletionRequest
@@ -491,8 +676,7 @@ class Client:
             data=msgspec.json.encode(body),
             headers={"Content-Type": "application/json"},
         )
-        response.raise_for_status()
-        return msgspec.json.decode(response.content or b"", type=EmbeddingResponse)
+        return self._finish_embedding(response)
 
     def rerank(
         self,
@@ -515,17 +699,12 @@ class Client:
         each document may be a plain string or, for multimodal input, a
         ScoreMultiModalParam wrapping text/image content parts.
         """
-        if not documents:
-            raise ValueError("rerank() requires at least one document")
-        if top_n is not None and top_n < 1:
-            raise ValueError("top_n must be a positive integer")
-
-        body = RerankRequest(
-            query=query,
-            documents=list(documents),
-            top_n=top_n if top_n is not None else UNSET,
+        body = self._build_rerank_request(
+            query,
+            documents,
             model=model,
-            instruction=instruction if instruction is not None else UNSET,
+            top_n=top_n,
+            instruction=instruction,
         )
         response = self._make_request(
             HttpMethod.POST,
@@ -533,27 +712,7 @@ class Client:
             data=msgspec.json.encode(body),
             headers={"Content-Type": "application/json"},
         )
-        response.raise_for_status()
-        decoded = msgspec.json.decode(response.content or b"", type=RerankResponse)
-        return decoded.results
-
-    def _server_url(self) -> str:
-        """The server's base URL."""
-        scheme = "https" if self.secure else "http"
-        return f"{scheme}://{self.fqdn}"
-
-    def _endpoint_url(self, endpoint: str) -> str:
-        """The absolute URL for an endpoint path."""
-        if not endpoint.startswith("/"):
-            endpoint = f"/{endpoint}"
-        return f"{self._server_url()}{endpoint}"
-
-    def _default_headers(self) -> dict[str, str]:
-        """The auth (and session pin) headers sent with every request."""
-        headers = {"Authorization": f"Bearer {self._api_key}"}
-        if self._session_pin:
-            headers[SESSION_PIN_HEADER] = self._session_pin
-        return headers
+        return self._finish_rerank(response)
 
     def _make_request(
         self, method: HttpMethod, endpoint: str, **kwargs: Any
