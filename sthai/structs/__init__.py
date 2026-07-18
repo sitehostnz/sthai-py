@@ -31,6 +31,13 @@ from sthai.structs.completions import (
     UsageInfo,
     UserMessage,
 )
+from sthai.structs.embeddings import (
+    EmbeddingChatRequest,
+    EmbeddingCompletionRequest,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    EmbeddingResponseData,
+)
 from sthai.structs.models import (
     ModelCard,
     ModelList,
@@ -44,6 +51,11 @@ __all__ = [
     "AssistantMessage",
     "ChatMessage",
     "ContentPart",
+    "EmbeddingChatRequest",
+    "EmbeddingCompletionRequest",
+    "EmbeddingRequest",
+    "EmbeddingResponse",
+    "EmbeddingResponseData",
     "FunctionCall",
     "FunctionDefinition",
     "ImageContent",

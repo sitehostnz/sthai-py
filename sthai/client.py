@@ -1,3 +1,4 @@
+import warnings
 from base64 import b64encode
 from os import getenv
 from pathlib import Path
@@ -10,12 +11,14 @@ from niquests import request
 from niquests.models import Response
 
 from sthai.const import (
+    EMBEDDING_ENDPOINT,
+    EMBEDDING_PARAMS,
     HEALTH_ENDPOINT,
     INFERENCE_ENDPOINT,
     MODELS_ENDPOINT,
     SESSION_PIN_HEADER,
 )
-from sthai.models import InferenceModel
+from sthai.models import EmbeddingModel, InferenceModel
 from sthai.structs.completions import (
     AssistantMessage,
     ChatMessage,
@@ -27,6 +30,11 @@ from sthai.structs.completions import (
     SystemMessage,
     TextContent,
     UserMessage,
+)
+from sthai.structs.embeddings import (
+    EmbeddingChatRequest,
+    EmbeddingCompletionRequest,
+    EmbeddingResponse,
 )
 from sthai.structs.models import ModelCard, ModelList
 from sthai.typing import HttpMethod
@@ -87,6 +95,54 @@ def _prompt_content(
     """A user-message content value: plain text, or text plus image parts."""
     image_parts = _build_image_parts(image_urls, image_files)
     return [TextContent(text=prompt), *image_parts] if image_parts else prompt
+
+
+def _default_instruction(model: EmbeddingModel | str, query: bool) -> str | None:
+    """
+    The model's recommended embedding instruction, if known: its query
+    instruction when query is set, its document instruction otherwise.
+    """
+    params = EMBEDDING_PARAMS.get(model)
+    if params is None:
+        return None
+    return params.query_instruction if query else params.document_instruction
+
+
+def _check_dimensions(model: EmbeddingModel | str, dimensions: int | None) -> None:
+    """
+    Warn when a requested Matryoshka truncation exceeds or does not divide
+    evenly into the model's native output dimension (when both are known).
+    """
+    if dimensions is None:
+        return
+    if dimensions < 1:
+        raise ValueError("dimensions must be a positive integer")
+    params = EMBEDDING_PARAMS.get(model)
+    if params is None or params.dimensions is None:
+        return
+    if dimensions > params.dimensions:
+        warnings.warn(
+            f"dimensions={dimensions} exceeds the native {params.dimensions} "
+            f"dimensions of '{model}'",
+            stacklevel=3,
+        )
+    elif params.dimensions % dimensions != 0:
+        warnings.warn(
+            f"dimensions={dimensions} does not divide evenly into the native "
+            f"{params.dimensions} dimensions of '{model}'; use a power-of-two "
+            f"divisor (e.g. {params.dimensions // 2}, {params.dimensions // 4})",
+            stacklevel=3,
+        )
+
+
+def _float_embedding(embedding: list[float] | str) -> list[float]:
+    """
+    Ensure a decoded embedding is the float list the client requested (the
+    server returns strings for non-float encoding formats).
+    """
+    if isinstance(embedding, str):
+        raise TypeError("expected a float embedding, got an encoded string")
+    return embedding
 
 
 class Client:
@@ -212,6 +268,150 @@ class Client:
         decoded = msgspec.json.decode(response.content or b"", type=InferenceResponse)
         self._last_response = decoded
         return decoded
+
+    def embed(
+        self,
+        text: str | None = None,
+        *,
+        model: EmbeddingModel | str = EmbeddingModel.QWEN_3_VL_8B,
+        query: bool = False,
+        instruction: str | None = None,
+        image_urls: list[str] | None = None,
+        image_files: list[Path | bytes] | None = None,
+        dimensions: int | None = None,
+    ) -> list[float]:
+        """
+        Embed a single input (text, images, or both) and return its vector.
+
+        The instruction-trained model is steered by a default instruction
+        from EMBEDDING_PARAMS in sthai.const: the model's document
+        instruction, or its query instruction when query=True (use this when
+        embedding search queries). Passing instruction overrides either.
+
+        Each call produces exactly ONE vector - multimodal content rolls into
+        it; use batch_embed() to embed many texts in one request. dimensions
+        truncates the vector server-side (Matryoshka); powers of two work
+        best, up to the model's native dimension.
+        """
+        image_parts = _build_image_parts(image_urls, image_files)
+        parts: list[ContentPart] = []
+        # An empty string is treated as no text: embedding it would produce a
+        # meaningless vector, so it falls through to the guard below instead
+        if text:
+            parts.append(TextContent(text=text))
+        parts.extend(image_parts)
+        if not parts:
+            raise ValueError("embed() requires text and/or images")
+        _check_dimensions(model, dimensions)
+        content: str | list[ContentPart] = text if text and not image_parts else parts
+
+        if instruction is None:
+            instruction = _default_instruction(model, query)
+        messages: list[ChatMessage] = []
+        if instruction is not None:
+            messages.append(SystemMessage(content=instruction))
+        messages.append(UserMessage(content=content))
+        # The open assistant turn is intentional: with continue_final_message
+        # the template is left unterminated, matching how the model was
+        # trained to embed
+        messages.append(AssistantMessage(content=""))
+
+        body = EmbeddingChatRequest(
+            messages=messages,
+            model=model,
+            encoding_format="float",
+            dimensions=dimensions if dimensions is not None else UNSET,
+            continue_final_message=True,
+            # True (not the chat-form server default of False) so tokenization
+            # matches batch_embed's plain-input form, which defaults to True
+            add_special_tokens=True,
+        )
+        decoded = self._embedding_request(body)
+        outputs = decoded.output()
+        if not outputs:
+            raise ValueError("server returned no embedding data")
+        return _float_embedding(outputs[0])
+
+    def batch_embed(
+        self,
+        texts: list[str],
+        *,
+        model: EmbeddingModel | str = EmbeddingModel.QWEN_3_VL_8B,
+        query: bool = False,
+        instruction: str | None = None,
+        template: str | None = None,
+        dimensions: int | None = None,
+    ) -> list[list[float]]:
+        """
+        Embed a batch of texts in one request, returning one vector per text
+        in the same order. Text-only; use embed() for multimodal input.
+
+        Only the plain-input request form batches, and it bypasses the
+        server-side chat template, so each text is rendered through a local
+        template first; with the built-in templates the results match calling
+        embed() per text. template and instruction default from
+        EMBEDDING_PARAMS (the query instruction when query=True, as with
+        embed()). For models without known params, pass a template using
+        {instruction} and {text} placeholders - "{text}" alone for raw
+        untemplated input. dimensions truncates the vectors server-side.
+        """
+        if not texts:
+            raise ValueError("batch_embed() requires at least one text")
+        if not all(texts):
+            raise ValueError("batch_embed() texts must be non-empty strings")
+        if template is None:
+            params = EMBEDDING_PARAMS.get(model)
+            template = params.template if params is not None else None
+            if template is None:
+                raise ValueError(
+                    f"no known embedding template for model '{model}'; pass "
+                    'template= (use "{text}" for models that take raw '
+                    "untemplated input)"
+                )
+        if "{instruction}" not in template and (instruction is not None or query):
+            warnings.warn(
+                "the template has no {instruction} placeholder, so the requested "
+                "instruction steering will not be applied",
+                stacklevel=2,
+            )
+        if instruction is None:
+            instruction = _default_instruction(model, query)
+            if instruction is None and "{instruction}" in template:
+                raise ValueError(
+                    f"no known embedding instruction for model '{model}' but "
+                    "the template expects one; pass instruction="
+                )
+        _check_dimensions(model, dimensions)
+        try:
+            inputs = [
+                template.format(instruction=instruction, text=text) for text in texts
+            ]
+        except (KeyError, IndexError) as exc:
+            raise ValueError(
+                "template must use only the {instruction} and {text} "
+                "placeholders; escape literal braces as {{ and }}"
+            ) from exc
+        body = EmbeddingCompletionRequest(
+            input=inputs,
+            model=model,
+            encoding_format="float",
+            dimensions=dimensions if dimensions is not None else UNSET,
+        )
+        decoded = self._embedding_request(body)
+        return [_float_embedding(embedding) for embedding in decoded.output()]
+
+    def _embedding_request(
+        self, body: EmbeddingChatRequest | EmbeddingCompletionRequest
+    ) -> EmbeddingResponse:
+        """POST an embedding request and decode the response."""
+        response = self._make_request(
+            HttpMethod.POST,
+            EMBEDDING_ENDPOINT,
+            data=msgspec.json.encode(body),
+            headers={"Content-Type": "application/json"},
+        )
+        response.raise_for_status()
+        return msgspec.json.decode(response.content or b"", type=EmbeddingResponse)
 
     def _server_url(self) -> str:
         """The server's base URL."""
