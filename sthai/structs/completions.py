@@ -11,6 +11,7 @@ use plain defaults because vLLM always serializes every field.
 
 from typing import Any, Literal
 
+import msgspec
 from msgspec import UNSET, Struct, UnsetType, field
 
 from sthai.structs.common import InferenceOutput, Usage
@@ -266,3 +267,34 @@ class InferenceResponse(Struct):
             return InferenceOutput()
         message = self.choices[0].message
         return InferenceOutput(text=message.content, reasoning=message.reasoning)
+
+    def parse[T](self, response_type: type[T]) -> T:
+        """
+        Decode the response text into response_type, validating it.
+
+        Guided decoding guarantees schema-valid syntax but not completeness
+        (token-limit cutoffs) nor, with reasoning models, that the schema was
+        applied at all - so parsing doubles as the check, raising a ValueError
+        naming the cause on failure.
+        """
+        text = self.output().text
+        if text is None:
+            raise ValueError("response has no text content to parse")
+        try:
+            return msgspec.json.decode(text.encode(), type=response_type)
+        except msgspec.ValidationError:
+            # Valid JSON of the wrong shape; msgspec's message already names
+            # the offending field, so pass it through untouched
+            raise
+        except msgspec.DecodeError as exc:
+            if self.choices and self.choices[0].finish_reason == "length":
+                raise ValueError(
+                    "structured response was cut off by the token limit before "
+                    "the JSON completed; raise max_tokens"
+                ) from exc
+            # Guided decoding should make this impossible, but reasoning
+            # models have been seen to intermittently emit non-JSON content
+            raise ValueError(
+                f"structured response is not valid JSON ({exc}); "
+                f"content began: {text[:120]!r}"
+            ) from exc

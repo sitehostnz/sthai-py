@@ -28,6 +28,8 @@ from sthai.structs.completions import (
     ImageURL,
     InferenceRequest,
     InferenceResponse,
+    JsonSchemaResponseFormat,
+    ResponseFormat,
     SystemMessage,
     TextContent,
     UserMessage,
@@ -102,6 +104,23 @@ def _prompt_content(
     """A user-message content value: plain text, or text plus image parts."""
     image_parts = _build_image_parts(image_urls, image_files)
     return [TextContent(text=prompt), *image_parts] if image_parts else prompt
+
+
+def _response_format(response_type: type) -> ResponseFormat:
+    """
+    The response_format for a structured response: plain JSON mode for dict,
+    otherwise a JSON schema generated from the type for the server to
+    enforce via guided decoding.
+    """
+    if response_type is dict:
+        return ResponseFormat(type="json_object")
+    return ResponseFormat(
+        type="json_schema",
+        json_schema=JsonSchemaResponseFormat(
+            name=getattr(response_type, "__name__", "response"),
+            json_schema=msgspec.json.schema(response_type),
+        ),
+    )
 
 
 def _default_instruction(model: EmbeddingModel | str, query: bool) -> str | None:
@@ -201,11 +220,11 @@ class Client:
         self._chat_history = []
 
     def last_response(self) -> InferenceResponse | None:
-        """The full response from the most recent chat() call."""
+        """The full response from the most recent chat() or response() call."""
         return self._last_response
 
     def last_reasoning(self) -> str | None:
-        """The reasoning from the most recent chat() call, if any."""
+        """The reasoning from the most recent chat() or response() call, if any."""
         if self._last_response is None:
             return None
         return self._last_response.output().reasoning
@@ -262,6 +281,57 @@ class Client:
                 AssistantMessage(content=decoded.choices[0].message.content)
             )
         return decoded
+
+    def response[T](
+        self,
+        prompt: str,
+        *,
+        response_type: type[T] | None = None,
+        model: InferenceModel | str = InferenceModel.QWEN_3_6_27B,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        use_thinking: bool = False,
+        system_prompt: str | None = None,
+        image_urls: list[str] | None = None,
+        image_files: list[Path | bytes] | None = None,
+    ) -> T | InferenceResponse:
+        """
+        One-off inference: like chat(), but the stored chat history is
+        neither sent nor updated. The response remains available through
+        last_response() and last_reasoning().
+
+        Pass response_type for a structured response: a msgspec Struct type
+        becomes a JSON schema the server enforces during generation, and the
+        response text is decoded and validated into that type and returned.
+        response_type=dict just constrains the output to valid JSON. Without
+        response_type the full InferenceResponse is returned, as with chat().
+
+        Thinking combines with structured responses (reasoning stays
+        unconstrained) but consumes max_tokens, so budget generously. The
+        server occasionally skips the schema when thinking is enabled;
+        parsing then raises a ValueError - retry, or disable thinking.
+        """
+        messages: list[ChatMessage] = []
+        if system_prompt:
+            messages.append(SystemMessage(content=system_prompt))
+        messages.append(
+            UserMessage(content=_prompt_content(prompt, image_urls, image_files))
+        )
+
+        body = InferenceRequest(
+            messages=messages,
+            model=model,
+            max_completion_tokens=max_tokens if max_tokens is not None else UNSET,
+            temperature=temperature if temperature is not None else UNSET,
+            chat_template_kwargs={"enable_thinking": use_thinking},
+            response_format=(
+                _response_format(response_type) if response_type is not None else UNSET
+            ),
+        )
+        decoded = self._inference_request(body)
+        if response_type is None:
+            return decoded
+        return decoded.parse(response_type)
 
     def _inference_request(self, body: InferenceRequest) -> InferenceResponse:
         """POST an inference request and record the decoded last response."""
