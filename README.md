@@ -20,12 +20,12 @@ The platform currently serves three models, one per capability (see the [models 
 
 ## Installation
 
-Not on PyPI just yet - that's coming soon. For now, clone and sync (requires Python 3.13+ and [uv](https://docs.astral.sh/uv/)):
+Requires Python 3.10+. Install from [PyPI](https://pypi.org/project/sthai/):
 
 ```bash
-git clone https://github.com/ftsartek/sthai-py.git
-cd sthai-py
-uv sync
+pip install sthai
+# or, in a uv project
+uv add sthai
 ```
 
 ## Getting started
@@ -165,9 +165,11 @@ for card in client.models():
 
 ## Development
 
-The test suite runs entirely offline against fixtures captured from the live API:
+Development uses [uv](https://docs.astral.sh/uv/). The test suite runs entirely offline against fixtures captured from the live API:
 
 ```bash
+git clone https://github.com/ftsartek/sthai-py.git
+cd sthai-py
 uv sync
 uv run pytest
 uv run ruff check sthai/ tests/
