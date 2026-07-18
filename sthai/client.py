@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from os import getenv
 from pathlib import Path
 from secrets import token_hex
-from typing import Any
+from typing import Any, TypeVar
 
 import msgspec
 from msgspec import UNSET
@@ -48,6 +48,9 @@ from sthai.structs.rerank import (
     ScoreMultiModalParam,
 )
 from sthai.typing import HttpMethod
+
+# TypeVar rather than PEP 695 syntax to stay compatible with Python 3.10
+T = TypeVar("T")
 
 # Magic-byte prefixes for the image formats the API accepts
 _IMAGE_MAGIC_BYTES = {
@@ -283,7 +286,7 @@ class Client:
             )
         return decoded
 
-    def response[T](
+    def response(
         self,
         prompt: str,
         *,

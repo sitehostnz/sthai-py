@@ -9,12 +9,15 @@ encoded payload and the server applies its own defaults. Response-side fields
 use plain defaults because vLLM always serializes every field.
 """
 
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import msgspec
 from msgspec import UNSET, Struct, UnsetType, field
 
 from sthai.structs.common import InferenceOutput, Usage
+
+# TypeVar rather than PEP 695 syntax to stay compatible with Python 3.10
+T = TypeVar("T")
 
 # --- Shared tool-call structs (request assistant messages and responses) ---
 
@@ -268,7 +271,7 @@ class InferenceResponse(Struct):
         message = self.choices[0].message
         return InferenceOutput(text=message.content, reasoning=message.reasoning)
 
-    def parse[T](self, response_type: type[T]) -> T:
+    def parse(self, response_type: type[T]) -> T:
         """
         Decode the response text into response_type, validating it.
 

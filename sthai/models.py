@@ -1,4 +1,4 @@
-from enum import StrEnum
+from sthai.typing import StrEnum
 
 
 class InferenceModel(StrEnum):
