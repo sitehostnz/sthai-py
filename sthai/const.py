@@ -4,6 +4,7 @@ from sthai.models import EmbeddingModel
 
 INFERENCE_ENDPOINT = "/v1/chat/completions"
 EMBEDDING_ENDPOINT = "/v1/embeddings"
+RERANKING_ENDPOINT = "/v1/rerank"
 MODELS_ENDPOINT = "/v1/models"
 HEALTH_ENDPOINT = "/health"
 

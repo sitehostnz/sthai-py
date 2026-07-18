@@ -16,9 +16,10 @@ from sthai.const import (
     HEALTH_ENDPOINT,
     INFERENCE_ENDPOINT,
     MODELS_ENDPOINT,
+    RERANKING_ENDPOINT,
     SESSION_PIN_HEADER,
 )
-from sthai.models import EmbeddingModel, InferenceModel
+from sthai.models import EmbeddingModel, InferenceModel, RerankingModel
 from sthai.structs.completions import (
     AssistantMessage,
     ChatMessage,
@@ -37,6 +38,12 @@ from sthai.structs.embeddings import (
     EmbeddingResponse,
 )
 from sthai.structs.models import ModelCard, ModelList
+from sthai.structs.rerank import (
+    RerankRequest,
+    RerankResponse,
+    RerankResult,
+    ScoreMultiModalParam,
+)
 from sthai.typing import HttpMethod
 
 # Magic-byte prefixes for the image formats the API accepts
@@ -412,6 +419,48 @@ class Client:
         )
         response.raise_for_status()
         return msgspec.json.decode(response.content or b"", type=EmbeddingResponse)
+
+    def rerank(
+        self,
+        query: str | ScoreMultiModalParam,
+        documents: list[str | ScoreMultiModalParam],
+        *,
+        model: RerankingModel | str = RerankingModel.QWEN_3_VL_8B,
+        top_n: int | None = None,
+        instruction: str | None = None,
+    ) -> list[RerankResult]:
+        """
+        Score each document against the query and return the results sorted
+        by relevance score descending, each carrying the document, its
+        relevance_score, and its index in the input documents list.
+
+        All documents are returned unless top_n limits it. The
+        instruction-trained model applies its own default instruction; pass
+        instruction to steer relevance for a specific task. The query and
+        each document may be a plain string or, for multimodal input, a
+        ScoreMultiModalParam wrapping text/image content parts.
+        """
+        if not documents:
+            raise ValueError("rerank() requires at least one document")
+        if top_n is not None and top_n < 1:
+            raise ValueError("top_n must be a positive integer")
+
+        body = RerankRequest(
+            query=query,
+            documents=documents,
+            top_n=top_n if top_n is not None else UNSET,
+            model=model,
+            instruction=instruction if instruction is not None else UNSET,
+        )
+        response = self._make_request(
+            HttpMethod.POST,
+            RERANKING_ENDPOINT,
+            data=msgspec.json.encode(body),
+            headers={"Content-Type": "application/json"},
+        )
+        response.raise_for_status()
+        decoded = msgspec.json.decode(response.content or b"", type=RerankResponse)
+        return decoded.results
 
     def _server_url(self) -> str:
         """The server's base URL."""

@@ -7,3 +7,7 @@ class InferenceModel(StrEnum):
 
 class EmbeddingModel(StrEnum):
     QWEN_3_VL_8B = "Qwen/Qwen3-VL-Embedding-8B"
+
+
+class RerankingModel(StrEnum):
+    QWEN_3_VL_8B = "Qwen/Qwen3-VL-Reranker-8B"

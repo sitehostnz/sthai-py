@@ -43,6 +43,15 @@ from sthai.structs.models import (
     ModelList,
     ModelPermission,
 )
+from sthai.structs.rerank import (
+    RerankDocument,
+    RerankRequest,
+    RerankResponse,
+    RerankResult,
+    RerankUsage,
+    ScoreInput,
+    ScoreMultiModalParam,
+)
 
 __all__ = [
     "ModelCard",
@@ -70,9 +79,16 @@ __all__ = [
     "NamedFunction",
     "NamedToolChoice",
     "PromptTokenUsageInfo",
+    "RerankDocument",
+    "RerankRequest",
+    "RerankResponse",
+    "RerankResult",
+    "RerankUsage",
     "ResponseChoice",
     "ResponseFormat",
     "ResponseMessage",
+    "ScoreInput",
+    "ScoreMultiModalParam",
     "StreamOptions",
     "SystemMessage",
     "TextContent",
