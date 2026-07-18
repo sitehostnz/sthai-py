@@ -42,10 +42,12 @@ module-root = ""
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
     "pytest>=8",
+    "pytest-asyncio>=1.0",
     "ruff>=0.15.22",
     "ty>=0.0.60",
 ]

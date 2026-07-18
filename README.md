@@ -163,6 +163,24 @@ for card in client.models():
     print(card.id)
 ```
 
+### Async
+
+`AsyncClient` mirrors `Client` method-for-method, with every network method awaitable. Like `Client` it is session-less: construct it and go - there is no `async with` or `close()` to manage.
+
+```python
+import asyncio
+from sthai import AsyncClient
+
+async def main() -> None:
+    client = AsyncClient()
+    response = await client.chat("What's the tallest mountain in New Zealand?")
+    print(response.output().text)
+
+asyncio.run(main())
+```
+
+Async is most useful for concurrent fan-out, such as `asyncio.gather` over many `embed()` or `rerank()` calls.
+
 ## Development
 
 Development uses [uv](https://docs.astral.sh/uv/). The test suite runs entirely offline against fixtures captured from the live API:
