@@ -3,8 +3,9 @@ Shared test fixtures: a mock backend that replays captured live responses.
 
 The fixtures in tests/fixtures/ are real exchanges recorded from the live
 API by tests/capture_fixtures.py. MockBackend replaces sthai.client.request
-(the module-level niquests import), so tests exercise the full client path -
-URL building, headers, body encoding - without any network access.
+and sthai.async_client.arequest (the module-level niquests imports), so tests
+exercise the full client path - URL building, headers, body encoding -
+without any network access.
 """
 
 import json
@@ -16,6 +17,7 @@ from urllib.parse import urlsplit
 import pytest
 from niquests.exceptions import HTTPError
 
+from sthai.async_client import AsyncClient
 from sthai.client import Client
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -106,12 +108,17 @@ class MockBackend:
             raise AssertionError(f"no fixture registered for {method} {path}")
         return FakeResponse(*route)
 
+    async def handle_async(self, method: Any, url: str, **kwargs: Any) -> FakeResponse:
+        """Replacement for niquests arequest: same routing as handle()."""
+        return self.handle(method, url, **kwargs)
+
 
 @pytest.fixture
 def backend(monkeypatch: pytest.MonkeyPatch) -> MockBackend:
-    """A fresh MockBackend patched in as the client's transport."""
+    """A fresh MockBackend patched in as both clients' transport."""
     mock = MockBackend()
     monkeypatch.setattr("sthai.client.request", mock.handle)
+    monkeypatch.setattr("sthai.async_client.arequest", mock.handle_async)
     return mock
 
 
@@ -119,3 +126,9 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> MockBackend:
 def client() -> Client:
     """A client with a dummy key; combine with backend to serve responses."""
     return Client(api_key="test-key")
+
+
+@pytest.fixture
+def async_client() -> AsyncClient:
+    """An async client with a dummy key; combine with backend as above."""
+    return AsyncClient(api_key="test-key")
