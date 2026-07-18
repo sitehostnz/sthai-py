@@ -1,6 +1,6 @@
 [project]
 name = "sthai"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python client for the SiteHost AI Platform: inference, embeddings and reranking"
 readme = "README.md"
 license = "MIT"
