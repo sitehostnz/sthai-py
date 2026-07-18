@@ -1,5 +1,6 @@
 import warnings
 from base64 import b64encode
+from collections.abc import Sequence
 from os import getenv
 from pathlib import Path
 from secrets import token_hex
@@ -493,7 +494,8 @@ class Client:
     def rerank(
         self,
         query: str | ScoreMultiModalParam,
-        documents: list[str | ScoreMultiModalParam],
+        # Sequence rather than list so a plain list[str] type-checks
+        documents: Sequence[str | ScoreMultiModalParam],
         *,
         model: RerankingModel | str = RerankingModel.QWEN_3_VL_8B,
         top_n: int | None = None,
@@ -517,7 +519,7 @@ class Client:
 
         body = RerankRequest(
             query=query,
-            documents=documents,
+            documents=list(documents),
             top_n=top_n if top_n is not None else UNSET,
             model=model,
             instruction=instruction if instruction is not None else UNSET,
