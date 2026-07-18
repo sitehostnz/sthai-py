@@ -1,18 +1,47 @@
 [project]
-name = "sthai-py"
+name = "sthai"
 version = "0.1.0"
-description = "Add your description here"
+description = "Python client for the SiteHost AI Platform: inference, embeddings and reranking"
 readme = "README.md"
-requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Jordan Russell" }]
+requires-python = ">=3.10"
+keywords = ["sitehost", "ai", "llm", "inference", "embeddings", "reranking", "vllm"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
 dependencies = [
     "msgspec>=0.21.1",
     "niquests>=3.20.1",
 ]
 
+[project.urls]
+Repository = "https://github.com/ftsartek/sthai-py"
+Issues = "https://github.com/ftsartek/sthai-py/issues"
+"SiteHost AI Platform" = "https://kb.sitehost.nz/ai-platform"
+
+[build-system]
+requires = ["uv_build>=0.10,<0.11"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Flat layout: the sthai package sits at the repository root, not under src/
+module-name = "sthai"
+module-root = ""
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# The project is not installed as a package; import sthai from the repo root
-pythonpath = ["."]
 
 [dependency-groups]
 dev = [
