@@ -8,6 +8,7 @@ from sthai.const import (
     EMBEDDING_ENDPOINT,
     EMBEDDING_QUERY_INSTRUCTION,
 )
+from sthai.exceptions import InputError, ResponseError
 
 from conftest import MockBackend, load_fixture
 
@@ -74,17 +75,17 @@ def test_multimodal_content_parts(backend: MockBackend, client: Client) -> None:
 
 
 def test_no_input_raises(client: Client) -> None:
-    with pytest.raises(ValueError, match="requires text and/or images"):
+    with pytest.raises(InputError, match="requires text and/or images"):
         client.embed()
 
 
 def test_empty_string_treated_as_no_text(client: Client) -> None:
-    with pytest.raises(ValueError, match="requires text and/or images"):
+    with pytest.raises(InputError, match="requires text and/or images"):
         client.embed("")
 
 
 def test_zero_dimensions_raises(client: Client) -> None:
-    with pytest.raises(ValueError, match="positive integer"):
+    with pytest.raises(InputError, match="positive integer"):
         client.embed("text", dimensions=0)
 
 
@@ -104,5 +105,5 @@ def test_empty_response_data_raises(backend: MockBackend, client: Client) -> Non
     fixture = load_fixture("embed_single")
     fixture["response"]["data"] = []
     backend.respond("POST", EMBEDDING_ENDPOINT, fixture["response"])
-    with pytest.raises(ValueError, match="no embedding data"):
+    with pytest.raises(ResponseError, match="no embedding data"):
         client.embed("text")

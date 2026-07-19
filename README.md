@@ -97,7 +97,7 @@ print(city.population)
 data = client.response("List three NZ birds as JSON.", response_type=dict)
 ```
 
-If the output is cut off by the token limit, or (rarely, with thinking enabled) the server skips the schema, parsing raises a `ValueError` naming the cause.
+If the output is cut off by the token limit, or (rarely, with thinking enabled) the server skips the schema, parsing raises a `sthai.ResponseParseError` naming the cause.
 
 ### Embeddings
 
@@ -181,6 +181,30 @@ asyncio.run(main())
 ```
 
 Async is most useful for concurrent fan-out, such as `asyncio.gather` over many `embed()` or `rerank()` calls.
+
+### Error handling
+
+Every error the client raises subclasses `sthai.SthaiError`, so catching it is enough to handle anything sthai can raise - you never need to import niquests or msgspec:
+
+```python
+from sthai import APIError, Client, ClientError, InputError, ResponseError, TransportError
+
+client = Client()
+try:
+    response = client.chat("hello", model="no-such-model")
+except ClientError as exc:
+    print(exc.status_code, exc.error_type, exc)  # 404 invalid_request_error 404: model not found (invalid_request_error)
+except APIError:
+    ...  # 5xx: the server had a problem
+except TransportError:
+    ...  # the request never completed: connection failure, timeout, TLS error
+except InputError:
+    ...  # bad arguments to a client method
+except ResponseError:
+    ...  # the server returned something the client couldn't use
+```
+
+`ClientError` (4xx) and `APIError` (5xx) both subclass `APIStatusError`, which carries `status_code`, `response`, `server_message` and `error_type` (parsed from the server's error body when present). `ResponseParseError`, raised by `response()`'s structured-output parsing, subclasses `ResponseError`.
 
 ## Development
 

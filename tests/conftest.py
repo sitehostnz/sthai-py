@@ -15,7 +15,6 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
-from niquests.exceptions import HTTPError
 
 from sthai.async_client import AsyncClient
 from sthai.client import Client
@@ -38,10 +37,6 @@ class FakeResponse:
     @property
     def ok(self) -> bool:
         return self.status_code < 400
-
-    def raise_for_status(self) -> None:
-        if self.status_code >= 400:
-            raise HTTPError(f"{self.status_code} Error")
 
 
 @dataclass

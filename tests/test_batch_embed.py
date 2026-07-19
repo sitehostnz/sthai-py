@@ -8,6 +8,7 @@ from sthai.const import (
     EMBEDDING_ENDPOINT,
     QWEN_3_VL_EMBEDDING_TEMPLATE,
 )
+from sthai.exceptions import InputError
 
 from conftest import MockBackend, load_fixture
 
@@ -57,17 +58,17 @@ def test_custom_raw_template(backend: MockBackend, client: Client) -> None:
 
 
 def test_empty_list_raises(client: Client) -> None:
-    with pytest.raises(ValueError, match="at least one text"):
+    with pytest.raises(InputError, match="at least one text"):
         client.batch_embed([])
 
 
 def test_empty_string_member_raises(client: Client) -> None:
-    with pytest.raises(ValueError, match="non-empty strings"):
+    with pytest.raises(InputError, match="non-empty strings"):
         client.batch_embed(["fine", ""])
 
 
 def test_unknown_model_without_template_raises(client: Client) -> None:
-    with pytest.raises(ValueError, match="no known embedding template"):
+    with pytest.raises(InputError, match="no known embedding template"):
         client.batch_embed(["text"], model="unknown/model")
 
 
@@ -80,5 +81,5 @@ def test_template_without_instruction_placeholder_warns(
 
 
 def test_stray_template_placeholder_raises(client: Client) -> None:
-    with pytest.raises(ValueError, match="escape literal braces"):
+    with pytest.raises(InputError, match="escape literal braces"):
         client.batch_embed(["text"], template="{text} {oops}")

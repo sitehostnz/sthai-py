@@ -3,6 +3,7 @@
 import pytest
 
 from sthai.client import Client
+from sthai.exceptions import InputError
 from sthai.structs.completions import TextContent
 from sthai.structs.rerank import RerankResult, ScoreMultiModalParam
 
@@ -63,10 +64,10 @@ def test_multimodal_query_encoding(backend: MockBackend, client: Client) -> None
 
 
 def test_empty_documents_raises(client: Client) -> None:
-    with pytest.raises(ValueError, match="at least one document"):
+    with pytest.raises(InputError, match="at least one document"):
         client.rerank(QUERY, [])
 
 
 def test_zero_top_n_raises(client: Client) -> None:
-    with pytest.raises(ValueError, match="positive integer"):
+    with pytest.raises(InputError, match="positive integer"):
         client.rerank(QUERY, DOCUMENTS, top_n=0)

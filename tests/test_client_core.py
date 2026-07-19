@@ -1,17 +1,17 @@
 """Client construction and transport: URLs, headers, health, models, errors."""
 
 import pytest
-from niquests.exceptions import HTTPError
 
 from sthai.client import Client
 from sthai.const import SESSION_PIN_HEADER
+from sthai.exceptions import ClientError, InputError
 from sthai.structs.models import ModelCard
 
 from conftest import MockBackend
 
 
 def test_missing_api_key_raises() -> None:
-    with pytest.raises(ValueError, match="api_key"):
+    with pytest.raises(InputError, match="api_key"):
         Client(api_key="")
 
 
@@ -81,5 +81,8 @@ def test_models_returns_model_cards(backend: MockBackend, client: Client) -> Non
 
 def test_http_error_raised_on_bad_model(backend: MockBackend, client: Client) -> None:
     backend.register("error_bad_model")
-    with pytest.raises(HTTPError):
+    with pytest.raises(ClientError, match="model not found") as exc_info:
         client.chat("hello", model="does-not-exist", use_history=False)
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.server_message == "model not found"
+    assert exc_info.value.error_type == "invalid_request_error"

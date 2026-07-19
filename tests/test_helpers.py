@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from sthai.client import image_content
+from sthai.exceptions import InputError
 
 PNG = b"\x89PNG\r\n\x1a\nrest-of-file"
 JPEG = b"\xff\xd8\xff\xe0rest-of-file"
@@ -40,5 +41,5 @@ def test_path_input_read_from_disk(tmp_path: Path) -> None:
 
 
 def test_unrecognized_format_raises() -> None:
-    with pytest.raises(ValueError, match="unrecognized image format"):
+    with pytest.raises(InputError, match="unrecognized image format"):
         image_content(b"plain text, not an image")
