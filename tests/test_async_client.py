@@ -10,10 +10,10 @@ and the stateful history/last-response plumbing around it.
 import msgspec
 import pytest
 from msgspec import Struct
-from niquests.exceptions import HTTPError
 
 from sthai.async_client import AsyncClient
 from sthai.const import SESSION_PIN_HEADER
+from sthai.exceptions import ClientError, InputError
 from sthai.structs.completions import InferenceResponse
 
 from conftest import MockBackend
@@ -81,7 +81,7 @@ async def test_failed_call_raises_and_does_not_write_history(
     backend: MockBackend, async_client: AsyncClient
 ) -> None:
     backend.register("error_bad_model")
-    with pytest.raises(HTTPError):
+    with pytest.raises(ClientError):
         await async_client.chat("doomed")
     backend.register("chat_simple")
     await async_client.chat("second")
@@ -132,7 +132,7 @@ async def test_embed(backend: MockBackend, async_client: AsyncClient) -> None:
 async def test_embed_validation_raises_before_any_request(
     backend: MockBackend, async_client: AsyncClient
 ) -> None:
-    with pytest.raises(ValueError, match="requires text and/or images"):
+    with pytest.raises(InputError, match="requires text and/or images"):
         await async_client.embed("")
     assert backend.calls == []
 

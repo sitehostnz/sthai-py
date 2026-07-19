@@ -9,6 +9,7 @@ from typing import Any, TypeVar
 import msgspec
 from msgspec import UNSET
 from niquests import request
+from niquests.exceptions import RequestException
 from niquests.models import Response
 
 from sthai.const import (
@@ -19,6 +20,12 @@ from sthai.const import (
     MODELS_ENDPOINT,
     RERANKING_ENDPOINT,
     SESSION_PIN_HEADER,
+)
+from sthai.exceptions import (
+    InputError,
+    ResponseError,
+    TransportError,
+    raise_for_status,
 )
 from sthai.models import EmbeddingModel, InferenceModel, RerankingModel
 from sthai.structs.completions import (
@@ -74,7 +81,7 @@ def _image_file_to_data_uri(image: Path | bytes) -> str:
                 mime = magic_mime
                 break
         else:
-            raise ValueError(
+            raise InputError(
                 "unrecognized image format: expected PNG, JPEG, GIF, or WEBP"
             )
     return f"data:{mime};base64,{b64encode(data).decode('ascii')}"
@@ -146,7 +153,7 @@ def _check_dimensions(model: EmbeddingModel | str, dimensions: int | None) -> No
     if dimensions is None:
         return
     if dimensions < 1:
-        raise ValueError("dimensions must be a positive integer")
+        raise InputError("dimensions must be a positive integer")
     params = EMBEDDING_PARAMS.get(model)
     if params is None or params.dimensions is None:
         return
@@ -171,8 +178,18 @@ def _float_embedding(embedding: list[float] | str) -> list[float]:
     server returns strings for non-float encoding formats).
     """
     if isinstance(embedding, str):
-        raise TypeError("expected a float embedding, got an encoded string")
+        raise ResponseError("expected a float embedding, got an encoded string")
     return embedding
+
+
+def _decode(response: Response, type_: type[T]) -> T:
+    """Decode a successful response body, wrapping msgspec failures."""
+    try:
+        return msgspec.json.decode(response.content or b"", type=type_)
+    except (msgspec.DecodeError, msgspec.ValidationError) as exc:
+        raise ResponseError(
+            f"could not decode the server's {type_.__name__} response: {exc}"
+        ) from exc
 
 
 class _BaseClient:
@@ -202,7 +219,7 @@ class _BaseClient:
         self.fqdn = fqdn
         self.secure = secure
         if not api_key:
-            raise ValueError("api_key is required")
+            raise InputError("api_key is required")
         self._api_key = api_key
         self._session_pin = session_pin
         if not self._session_pin and auto_session:
@@ -332,7 +349,7 @@ class _BaseClient:
             parts.append(TextContent(text=text))
         parts.extend(image_parts)
         if not parts:
-            raise ValueError("embed() requires text and/or images")
+            raise InputError("embed() requires text and/or images")
         _check_dimensions(model, dimensions)
         content: str | list[ContentPart] = text if text and not image_parts else parts
 
@@ -370,14 +387,14 @@ class _BaseClient:
     ) -> EmbeddingCompletionRequest:
         """Build a batch_embed() request body, rendering the local template."""
         if not texts:
-            raise ValueError("batch_embed() requires at least one text")
+            raise InputError("batch_embed() requires at least one text")
         if not all(texts):
-            raise ValueError("batch_embed() texts must be non-empty strings")
+            raise InputError("batch_embed() texts must be non-empty strings")
         if template is None:
             params = EMBEDDING_PARAMS.get(model)
             template = params.template if params is not None else None
             if template is None:
-                raise ValueError(
+                raise InputError(
                     f"no known embedding template for model '{model}'; pass "
                     'template= (use "{text}" for models that take raw '
                     "untemplated input)"
@@ -391,7 +408,7 @@ class _BaseClient:
         if instruction is None:
             instruction = _default_instruction(model, query)
             if instruction is None and "{instruction}" in template:
-                raise ValueError(
+                raise InputError(
                     f"no known embedding instruction for model '{model}' but "
                     "the template expects one; pass instruction="
                 )
@@ -401,7 +418,7 @@ class _BaseClient:
                 template.format(instruction=instruction, text=text) for text in texts
             ]
         except (KeyError, IndexError) as exc:
-            raise ValueError(
+            raise InputError(
                 "template must use only the {instruction} and {text} "
                 "placeholders; escape literal braces as {{ and }}"
             ) from exc
@@ -423,9 +440,9 @@ class _BaseClient:
     ) -> RerankRequest:
         """Build a rerank() request body, validating the inputs."""
         if not documents:
-            raise ValueError("rerank() requires at least one document")
+            raise InputError("rerank() requires at least one document")
         if top_n is not None and top_n < 1:
-            raise ValueError("top_n must be a positive integer")
+            raise InputError("top_n must be a positive integer")
 
         return RerankRequest(
             query=query,
@@ -437,26 +454,26 @@ class _BaseClient:
 
     def _finish_models(self, response: Response) -> list[ModelCard]:
         """Decode a model-list response."""
-        response.raise_for_status()
-        return msgspec.json.decode(response.content or b"", type=ModelList).data
+        raise_for_status(response)
+        return _decode(response, ModelList).data
 
     def _finish_inference(self, response: Response) -> InferenceResponse:
         """Decode an inference response and record it as the last response."""
-        response.raise_for_status()
-        decoded = msgspec.json.decode(response.content or b"", type=InferenceResponse)
+        raise_for_status(response)
+        decoded = _decode(response, InferenceResponse)
         self._last_response = decoded
         return decoded
 
     def _finish_embedding(self, response: Response) -> EmbeddingResponse:
         """Decode an embedding response."""
-        response.raise_for_status()
-        return msgspec.json.decode(response.content or b"", type=EmbeddingResponse)
+        raise_for_status(response)
+        return _decode(response, EmbeddingResponse)
 
     def _extract_single_embedding(self, decoded: EmbeddingResponse) -> list[float]:
         """The single float vector from an embed() response."""
         outputs = decoded.output()
         if not outputs:
-            raise ValueError("server returned no embedding data")
+            raise ResponseError("server returned no embedding data")
         return _float_embedding(outputs[0])
 
     def _extract_batch_embeddings(
@@ -467,9 +484,8 @@ class _BaseClient:
 
     def _finish_rerank(self, response: Response) -> list[RerankResult]:
         """Decode a rerank response into its result list."""
-        response.raise_for_status()
-        decoded = msgspec.json.decode(response.content or b"", type=RerankResponse)
-        return decoded.results
+        raise_for_status(response)
+        return _decode(response, RerankResponse).results
 
     def _server_url(self) -> str:
         """The server's base URL."""
@@ -568,7 +584,7 @@ class Client(_BaseClient):
         Thinking combines with structured responses (reasoning stays
         unconstrained) but consumes max_tokens, so budget generously. The
         server occasionally skips the schema when thinking is enabled;
-        parsing then raises a ValueError - retry, or disable thinking.
+        parsing then raises a ResponseParseError - retry, or disable thinking.
         """
         body = self._build_response_request(
             prompt,
@@ -719,4 +735,9 @@ class Client(_BaseClient):
     ) -> Response:
         """Send a request with default headers; kwargs pass through to niquests."""
         headers = self._default_headers() | kwargs.pop("headers", {})
-        return request(method, self._endpoint_url(endpoint), headers=headers, **kwargs)
+        try:
+            return request(
+                method, self._endpoint_url(endpoint), headers=headers, **kwargs
+            )
+        except RequestException as exc:
+            raise TransportError(f"request failed: {exc}") from exc

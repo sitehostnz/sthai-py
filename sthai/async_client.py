@@ -4,6 +4,7 @@ from typing import Any, TypeVar, cast
 
 import msgspec
 from niquests import arequest
+from niquests.exceptions import RequestException
 from niquests.models import Response
 
 from sthai.client import _BaseClient
@@ -14,6 +15,7 @@ from sthai.const import (
     MODELS_ENDPOINT,
     RERANKING_ENDPOINT,
 )
+from sthai.exceptions import TransportError
 from sthai.models import EmbeddingModel, InferenceModel, RerankingModel
 from sthai.structs.completions import InferenceRequest, InferenceResponse
 from sthai.structs.embeddings import (
@@ -110,7 +112,7 @@ class AsyncClient(_BaseClient):
         Thinking combines with structured responses (reasoning stays
         unconstrained) but consumes max_tokens, so budget generously. The
         server occasionally skips the schema when thinking is enabled;
-        parsing then raises a ValueError - retry, or disable thinking.
+        parsing then raises a ResponseParseError - retry, or disable thinking.
         """
         body = self._build_response_request(
             prompt,
@@ -264,9 +266,12 @@ class AsyncClient(_BaseClient):
         # Non-streaming arequest calls always return a fully-read Response,
         # but the **kwargs call resolves to the Response | AsyncResponse
         # overload, hence the cast
-        return cast(
-            Response,
-            await arequest(
-                method, self._endpoint_url(endpoint), headers=headers, **kwargs
-            ),
-        )
+        try:
+            return cast(
+                Response,
+                await arequest(
+                    method, self._endpoint_url(endpoint), headers=headers, **kwargs
+                ),
+            )
+        except RequestException as exc:
+            raise TransportError(f"request failed: {exc}") from exc

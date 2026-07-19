@@ -2,8 +2,10 @@
 
 import inspect
 
+import pytest
+
 import sthai
-from sthai import AsyncClient, Client
+from sthai import AsyncClient, Client, SthaiError
 
 # Every public API method the two clients must expose identically
 API_METHODS = [
@@ -25,13 +27,38 @@ def test_all_names_are_importable() -> None:
 def test_public_surface() -> None:
     # The names the README examples rely on
     assert set(sthai.__all__) == {
+        "APIError",
+        "APIStatusError",
         "AsyncClient",
         "Client",
+        "ClientError",
         "EmbeddingModel",
         "InferenceModel",
+        "InputError",
         "RerankingModel",
+        "ResponseError",
+        "ResponseParseError",
+        "SthaiError",
+        "TransportError",
         "image_content",
     }
+
+
+@pytest.mark.parametrize(
+    ("child", "parent"),
+    [
+        (sthai.InputError, SthaiError),
+        (sthai.TransportError, SthaiError),
+        (sthai.APIStatusError, SthaiError),
+        (sthai.ClientError, sthai.APIStatusError),
+        (sthai.APIError, sthai.APIStatusError),
+        (sthai.ResponseError, SthaiError),
+        (sthai.ResponseParseError, sthai.ResponseError),
+    ],
+)
+def test_exception_hierarchy(child: type, parent: type) -> None:
+    # `except SthaiError` must be enough to catch anything sthai raises
+    assert issubclass(child, parent)
 
 
 def test_async_client_mirrors_client_signatures() -> None:

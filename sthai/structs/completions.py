@@ -14,6 +14,7 @@ from typing import Any, Literal, TypeVar
 import msgspec
 from msgspec import UNSET, Struct, UnsetType, field
 
+from sthai.exceptions import ResponseParseError
 from sthai.structs.common import InferenceOutput, Usage
 
 # TypeVar rather than PEP 695 syntax to stay compatible with Python 3.10
@@ -277,27 +278,27 @@ class InferenceResponse(Struct):
 
         Guided decoding guarantees schema-valid syntax but not completeness
         (token-limit cutoffs) nor, with reasoning models, that the schema was
-        applied at all - so parsing doubles as the check, raising a ValueError
-        naming the cause on failure.
+        applied at all - so parsing doubles as the check, raising a
+        ResponseParseError naming the cause on failure.
         """
         text = self.output().text
         if text is None:
-            raise ValueError("response has no text content to parse")
+            raise ResponseParseError("response has no text content to parse")
         try:
             return msgspec.json.decode(text.encode(), type=response_type)
-        except msgspec.ValidationError:
+        except msgspec.ValidationError as exc:
             # Valid JSON of the wrong shape; msgspec's message already names
-            # the offending field, so pass it through untouched
-            raise
+            # the offending field, so pass it through as-is
+            raise ResponseParseError(str(exc)) from exc
         except msgspec.DecodeError as exc:
             if self.choices and self.choices[0].finish_reason == "length":
-                raise ValueError(
+                raise ResponseParseError(
                     "structured response was cut off by the token limit before "
                     "the JSON completed; raise max_tokens"
                 ) from exc
             # Guided decoding should make this impossible, but reasoning
             # models have been seen to intermittently emit non-JSON content
-            raise ValueError(
+            raise ResponseParseError(
                 f"structured response is not valid JSON ({exc}); "
                 f"content began: {text[:120]!r}"
             ) from exc

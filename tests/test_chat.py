@@ -1,9 +1,9 @@
 """chat(): responses, request wiring, and conversation history semantics."""
 
 import pytest
-from niquests.exceptions import HTTPError
 
 from sthai.client import Client
+from sthai.exceptions import ClientError
 from sthai.structs.completions import InferenceResponse
 
 from conftest import MockBackend
@@ -126,7 +126,7 @@ def test_failed_call_does_not_write_history(
     backend: MockBackend, client: Client
 ) -> None:
     backend.register("error_bad_model")
-    with pytest.raises(HTTPError):
+    with pytest.raises(ClientError):
         client.chat("doomed")
     backend.register("chat_simple")
     client.chat("second")

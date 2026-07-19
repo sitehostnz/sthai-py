@@ -8,6 +8,7 @@ from msgspec import Struct
 
 from sthai.client import Client
 from sthai.const import INFERENCE_ENDPOINT
+from sthai.exceptions import ResponseParseError
 from sthai.structs.completions import InferenceResponse
 
 from conftest import MockBackend, load_fixture
@@ -95,7 +96,7 @@ def test_truncated_response_raises_helpful_error(
     backend: MockBackend, client: Client
 ) -> None:
     backend.register("response_truncated")
-    with pytest.raises(ValueError, match="token limit"):
+    with pytest.raises(ResponseParseError, match="token limit"):
         client.response("facts please", response_type=CityInfo, max_tokens=10)
 
 
@@ -105,19 +106,19 @@ def test_prose_response_raises_not_valid_json(
     # The server occasionally skips the schema with thinking enabled and
     # returns prose; parse() must name that failure rather than crash
     respond_with_content(backend, "Sure! Wellington is the capital of New Zealand.")
-    with pytest.raises(ValueError, match="not valid JSON"):
+    with pytest.raises(ResponseParseError, match="not valid JSON"):
         client.response("facts please", response_type=CityInfo)
 
 
 def test_wrong_shape_raises_validation_error(
     backend: MockBackend, client: Client
 ) -> None:
-    with pytest.raises(msgspec.ValidationError, match="mayor"):
+    with pytest.raises(ResponseParseError, match="mayor"):
         backend.register("response_struct")
         client.response("facts please", response_type=StrictCity)
 
 
 def test_missing_content_raises(backend: MockBackend, client: Client) -> None:
     respond_with_content(backend, None)
-    with pytest.raises(ValueError, match="no text content"):
+    with pytest.raises(ResponseParseError, match="no text content"):
         client.response("facts please", response_type=CityInfo)
