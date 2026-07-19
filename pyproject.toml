@@ -27,8 +27,8 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/ftsartek/sthai-py"
-Issues = "https://github.com/ftsartek/sthai-py/issues"
+Repository = "https://github.com/sitehostnz/sthai-py"
+Issues = "https://github.com/sitehostnz/sthai-py/issues"
 "SiteHost AI Platform" = "https://kb.sitehost.nz/ai-platform"
 
 [build-system]
