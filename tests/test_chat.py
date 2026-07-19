@@ -3,7 +3,8 @@
 import pytest
 
 from sthai.client import Client
-from sthai.exceptions import ClientError
+from sthai.exceptions import ClientError, InputError
+from sthai.structs.common import Usage
 from sthai.structs.completions import InferenceResponse
 
 from conftest import MockBackend
@@ -131,3 +132,87 @@ def test_failed_call_does_not_write_history(
     backend.register("chat_simple")
     client.chat("second")
     assert [m["role"] for m in backend.last_call.body["messages"]] == ["user"]
+
+
+def test_history_getter_returns_turns(backend: MockBackend, client: Client) -> None:
+    fixture = backend.register("chat_simple")
+    client.chat("hello")
+    assert client.history() == [
+        {"role": "user", "content": "hello"},
+        {
+            "role": "assistant",
+            "content": fixture["response"]["choices"][0]["message"]["content"],
+        },
+    ]
+
+
+def test_set_history_restores_conversation(
+    backend: MockBackend, client: Client
+) -> None:
+    backend.register("chat_simple")
+    restored = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "a reply"},
+    ]
+    client.set_history(restored)
+    client.chat("second")
+    messages = backend.last_call.body["messages"]
+    assert messages == [*restored, {"role": "user", "content": "second"}]
+
+
+def test_set_history_rejects_missing_content(client: Client) -> None:
+    with pytest.raises(InputError, match="content"):
+        client.set_history([{"role": "user"}])
+
+
+def test_set_write_history_stops_recording(
+    backend: MockBackend, client: Client
+) -> None:
+    backend.register("chat_simple")
+    assert client.write_history() is True
+    client.chat("first")
+    client.set_write_history(False)
+    assert client.write_history() is False
+    client.chat("second")
+    # The stored history was still sent, but the second exchange not recorded
+    assert [m["role"] for m in backend.last_call.body["messages"]] == [
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert [m["content"] for m in client.history() if m["role"] == "user"] == ["first"]
+
+
+def test_history_usage_accumulates(backend: MockBackend, client: Client) -> None:
+    fixture = backend.register("chat_simple")
+    client.chat("first")
+    client.chat("second")
+    usage = client.history_usage()
+    wire_usage = fixture["response"]["usage"]
+    assert usage.input_tokens == 2 * wire_usage["prompt_tokens"]
+    assert usage.output_tokens == 2 * wire_usage["completion_tokens"]
+    assert usage.cached_tokens == 0
+
+
+def test_history_usage_excludes_unhistoried_calls(
+    backend: MockBackend, client: Client
+) -> None:
+    fixture = backend.register("chat_simple")
+    client.chat("first")
+    client.chat("standalone", use_history=False)
+    usage = client.history_usage()
+    wire_usage = fixture["response"]["usage"]
+    assert usage.input_tokens == wire_usage["prompt_tokens"]
+    assert usage.output_tokens == wire_usage["completion_tokens"]
+
+
+def test_history_usage_resets(backend: MockBackend, client: Client) -> None:
+    backend.register("chat_simple")
+    client.chat("first")
+    assert client.history_usage().input_tokens > 0
+    client.clear_history()
+    assert client.history_usage() == Usage()
+    client.chat("second")
+    assert client.history_usage().input_tokens > 0
+    client.set_history([{"role": "user", "content": "restored"}])
+    assert client.history_usage() == Usage()

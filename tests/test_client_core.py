@@ -60,6 +60,39 @@ def test_auto_session_generates_pin(backend: MockBackend) -> None:
     int(pin, 16)  # hex-encoded token
 
 
+def test_session_pin_accessors(backend: MockBackend, client: Client) -> None:
+    backend.register("health")
+    assert client.session_pin() is None
+    client.set_session_pin("my-pin")
+    assert client.session_pin() == "my-pin"
+    client.healthy()
+    assert backend.last_call.headers[SESSION_PIN_HEADER] == "my-pin"
+    client.set_session_pin(None)
+    assert client.session_pin() is None
+    client.healthy()
+    assert SESSION_PIN_HEADER not in backend.last_call.headers
+
+
+def test_auto_session_pin_readable(backend: MockBackend) -> None:
+    pinned = Client(api_key="test-key", auto_session=True)
+    pin = pinned.session_pin()
+    assert pin is not None
+    assert len(pin) == 48
+    int(pin, 16)  # hex-encoded token
+
+
+def test_new_session_switches_pin(backend: MockBackend) -> None:
+    backend.register("health")
+    pinned = Client(api_key="test-key", session_pin="old-pin")
+    pin = pinned.new_session()
+    assert len(pin) == 48
+    int(pin, 16)  # hex-encoded token
+    assert pin != "old-pin"
+    assert pinned.session_pin() == pin
+    pinned.healthy()
+    assert backend.last_call.headers[SESSION_PIN_HEADER] == pin
+
+
 def test_healthy_true_on_200(backend: MockBackend, client: Client) -> None:
     backend.register("health")
     assert client.healthy() is True

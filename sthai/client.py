@@ -1,6 +1,6 @@
 import warnings
 from base64 import b64encode
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from os import getenv
 from pathlib import Path
 from secrets import token_hex
@@ -42,6 +42,7 @@ from sthai.structs.completions import (
     TextContent,
     UserMessage,
 )
+from sthai.structs.common import Usage
 from sthai.structs.embeddings import (
     EmbeddingChatRequest,
     EmbeddingCompletionRequest,
@@ -223,14 +224,16 @@ class _BaseClient:
         self._api_key = api_key
         self._session_pin = session_pin
         if not self._session_pin and auto_session:
-            self._session_pin = token_hex(24)
+            self._session_pin = self._generate_session_pin()
         self._write_history = write_history
         self._chat_history: list[ChatMessage] = []
+        self._history_usage: list[Usage] = []
         self._last_response: InferenceResponse | None = None
 
     def clear_history(self) -> None:
-        """Discard the stored chat history."""
+        """Discard the stored chat history and its usage tally."""
         self._chat_history = []
+        self._history_usage = []
 
     def last_response(self) -> InferenceResponse | None:
         """The full response from the most recent chat() or response() call."""
@@ -241,6 +244,78 @@ class _BaseClient:
         if self._last_response is None:
             return None
         return self._last_response.output().reasoning
+
+    def session_pin(self) -> str | None:
+        """The session pin sent with requests, or None when unpinned."""
+        return self._session_pin
+
+    def set_session_pin(self, pin: str | None) -> None:
+        """Pin subsequent requests to a server session; None unpins."""
+        self._session_pin = pin
+
+    def new_session(self) -> str:
+        """Generate a fresh random session pin, switch to it, and return it."""
+        self._session_pin = self._generate_session_pin()
+        return self._session_pin
+
+    def history(self) -> list[dict[str, Any]]:
+        """The stored chat turns as role/content message dicts, oldest first."""
+        return [msgspec.to_builtins(message) for message in self._chat_history]
+
+    def set_history(self, turns: Sequence[Mapping[str, Any]]) -> None:
+        """
+        Replace the stored chat history, e.g. to restore a persisted
+        conversation. Each turn must be a mapping with a role key and a
+        content key. Resets the history usage tally, since restored turns
+        carry no usage information.
+        """
+        for turn in turns:
+            if (
+                not isinstance(turn, Mapping)
+                or "role" not in turn
+                or "content" not in turn
+            ):
+                raise InputError(
+                    "each history turn must be a mapping with role and content keys"
+                )
+        try:
+            restored: list[ChatMessage] = [
+                msgspec.convert(dict(turn), type=ChatMessage) for turn in turns
+            ]
+        except msgspec.ValidationError as exc:
+            raise InputError(f"invalid history turn: {exc}") from exc
+        self._chat_history = restored
+        self._history_usage = []
+
+    def write_history(self) -> bool:
+        """Whether chat() records conversation turns."""
+        return self._write_history
+
+    def set_write_history(self, enabled: bool) -> None:
+        """
+        Toggle whether chat() records conversation turns. Turning recording
+        off keeps the stored history and still sends it; only recording stops.
+        """
+        self._write_history = enabled
+
+    def history_usage(self) -> Usage:
+        """
+        Summed token usage across the calls that built the stored history.
+
+        Each call resends the conversation so far, so input tokens count
+        what the server processed (as billed), not unique tokens.
+        """
+        total = Usage()
+        for usage in self._history_usage:
+            total.input_tokens += usage.input_tokens
+            total.output_tokens += usage.output_tokens
+            total.cached_tokens += usage.cached_tokens
+        return total
+
+    @staticmethod
+    def _generate_session_pin() -> str:
+        """Generate a random session pin (48 hex characters)."""
+        return token_hex(24)
 
     def _build_chat_request(
         self,
@@ -296,6 +371,7 @@ class _BaseClient:
             self._chat_history.append(
                 AssistantMessage(content=decoded.choices[0].message.content)
             )
+            self._history_usage.append(decoded.usage())
 
     def _build_response_request(
         self,
