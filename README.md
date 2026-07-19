@@ -1,8 +1,9 @@
 # sthai-py
 
-[![Tests](https://github.com/ftsartek/sthai-py/actions/workflows/tests.yml/badge.svg)](https://github.com/ftsartek/sthai-py/actions/workflows/tests.yml)
+[![Tests](https://github.com/sitehostnz/sthai-py/actions/workflows/tests.yml/badge.svg)](https://github.com/sitehostnz/sthai-py/actions/workflows/tests.yml)
 
 A Python client for the [SiteHost AI Platform](https://kb.sitehost.nz/ai-platform): inference, embeddings and reranking with typed requests and responses built on [msgspec](https://jcristharif.com/msgspec/).
+Check out our [PHP client port](https://github.com/sitehostnz/sthai-php) as well!
 
 ## The SiteHost AI Platform
 
@@ -186,7 +187,7 @@ Async is most useful for concurrent fan-out, such as `asyncio.gather` over many 
 Development uses [uv](https://docs.astral.sh/uv/). The test suite runs entirely offline against fixtures captured from the live API:
 
 ```bash
-git clone https://github.com/ftsartek/sthai-py.git
+git clone https://github.com/sitehostnz/sthai-py.git
 cd sthai-py
 uv sync
 uv run pytest
