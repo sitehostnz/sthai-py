@@ -2,10 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.1.0] - 2026-07-20
 
 ### Added
 
+- Session pin accessors on both clients: `session_pin()` returns the pin in use (constructor-passed, `auto_session`-generated, or set later; `None` when unpinned), `set_session_pin()` pins subsequent requests to a session (`None` unpins), and `new_session()` switches to a freshly generated pin and returns it.
+- Chat history accessors: `history()` returns the stored turns as role/content dicts, oldest first, and `set_history()` replaces them, for restoring a persisted conversation. Invalid turns raise `InputError`.
+- `write_history()` and `set_write_history()` read and toggle turn recording after construction. Turning recording off keeps the stored history and still sends it; only recording stops.
+- `history_usage()` returns summed token usage across the calls that built the stored history. The tally resets with `clear_history()` and `set_history()`. Each call resends the conversation so far, so input tokens count what the server processed (as billed), not unique tokens.
 - Added a package-specific exception hierarchy in `sthai.exceptions`, exported from the top-level package: `SthaiError` (root), `InputError`, `TransportError`, `APIStatusError` with `ClientError` (4xx) and `APIError` (5xx), and `ResponseError` with `ResponseParseError`. Catching `SthaiError` is enough to handle anything the client raises.
 - HTTP error responses now parse the server's error body: `ClientError` and `APIError` carry `status_code`, `server_message`, `error_type` and the raw `response`.
 

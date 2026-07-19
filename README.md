@@ -57,6 +57,16 @@ client.clear_history()
 client.chat("Be brief: why is the sky blue?", system_prompt="You are terse.")
 ```
 
+The stored conversation is accessible: `history()` returns the turns as role/content dicts, and `set_history()` replaces them, for restoring a persisted conversation. `set_write_history()` toggles recording after construction; turning it off keeps the stored history and still sends it, only recording stops. `history_usage()` sums token usage across the calls that built the stored history. Each call resends the conversation so far, so input tokens count what the server processed (as billed), not unique tokens.
+
+```python
+saved = client.history()          # role/content dicts, oldest first
+client.set_history(saved)         # restore a persisted conversation
+client.set_write_history(False)   # stop recording; stored turns still sent
+
+print(client.history_usage().input_tokens)  # summed across the conversation
+```
+
 Thinking models can reason before answering; the reasoning rides along on the response:
 
 ```python
@@ -154,6 +164,10 @@ Pinning requests to a server session keeps routing consistent and helps caching.
 
 ```python
 client = Client(auto_session=True)
+print(client.session_pin())  # the pin in use; None when unpinned
+
+client.set_session_pin("my-own-pin")  # pin subsequent requests; None unpins
+pin = client.new_session()  # switch to a freshly generated pin
 ```
 
 ### Models and health
