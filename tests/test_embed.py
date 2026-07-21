@@ -18,7 +18,7 @@ FAKE_PNG = b"\x89PNG\r\n\x1a\nnot-a-real-image"
 
 def test_returns_float_vector(backend: MockBackend, client: Client) -> None:
     fixture = backend.register("embed_single")
-    vector = client.embed("The Beehive.", dimensions=32).vector()
+    vector = client.embed("The Beehive.", dimensions=32).output()[0]
     assert vector == fixture["response"]["data"][0]["embedding"]
     assert len(vector) == 32
     assert all(isinstance(value, float) for value in vector)
@@ -73,7 +73,7 @@ def test_explicit_instruction_overrides(backend: MockBackend, client: Client) ->
 
 def test_multimodal_content_parts(backend: MockBackend, client: Client) -> None:
     backend.register("embed_multimodal")
-    vector = client.embed("A small red square.", image_files=[FAKE_PNG]).vector()
+    vector = client.embed("A small red square.", image_files=[FAKE_PNG]).output()[0]
     assert isinstance(vector, list)
     user_content = backend.last_call.body["messages"][1]["content"]
     assert user_content[0] == {"type": "text", "text": "A small red square."}
@@ -113,4 +113,4 @@ def test_empty_response_data_raises(backend: MockBackend, client: Client) -> Non
     fixture["response"]["data"] = []
     backend.respond("POST", EMBEDDING_ENDPOINT, fixture["response"])
     with pytest.raises(ResponseError, match="no embedding data"):
-        client.embed("text").vector()
+        client.embed("text").output()

@@ -111,21 +111,21 @@ If the output is cut off by the token limit, or (rarely, with thinking enabled) 
 
 ### Embeddings
 
-`embed()` turns one input - text, images, or both - into a single vector, returned via `vector()` on the response. The embedding model is instruction-trained: document embedding is the default, and `query=True` switches to the query instruction for search-style lookups. `dimensions=` truncates the vector server-side (Matryoshka - powers of two work best):
+`embed()` turns one input - text, images, or both - into a single vector, the sole entry in the response's `output()`. The embedding model is instruction-trained: document embedding is the default, and `query=True` switches to the query instruction for search-style lookups. `dimensions=` truncates the vector server-side (Matryoshka - powers of two work best):
 
 ```python
-vector = client.embed("The Beehive is New Zealand's parliament building.").vector()
-query_vector = client.embed("Where does NZ parliament sit?", query=True).vector()
-small = client.embed("Compact vector, please.", dimensions=512).vector()
+vector = client.embed("The Beehive is New Zealand's parliament building.").output()[0]
+query_vector = client.embed("Where does NZ parliament sit?", query=True).output()[0]
+small = client.embed("Compact vector, please.", dimensions=512).output()[0]
 ```
 
-`batch_embed()` embeds many texts in one request; `vectors()` on the response is one vector per text in order:
+`batch_embed()` embeds many texts in one request; the response's `output()` is one vector per text in order:
 
 ```python
 vectors = client.batch_embed([
     "Wellington is the capital of New Zealand.",
     "Auckland is the largest city in New Zealand.",
-]).vectors()
+]).output()
 ```
 
 ### Reranking
@@ -150,14 +150,14 @@ Pass `instruction=` to steer relevance for a specific task; the model applies a 
 
 ### Response helpers
 
-Every inference, embedding and rerank call returns the full response struct, and every response struct has `usage()` (input/output/cached token counts) and `output()` (the useful payload). Embedding responses add `vector()` and `vectors()` for the float vectors themselves:
+Every inference, embedding and rerank call returns the full response struct, and every response struct has `usage()` (input/output/cached token counts) and `output()` (the useful payload):
 
 ```python
 response = client.chat("Hello!")
 print(response.usage().input_tokens, response.usage().output_tokens)
 
 embedded = client.embed("Hello!")
-print(embedded.usage().input_tokens, len(embedded.vector()))
+print(embedded.usage().input_tokens, len(embedded.output()[0]))
 ```
 
 The one exception is `response(response_type=...)`, which returns the parsed value directly; the full struct from the most recent inference call remains available via `last_response()`:

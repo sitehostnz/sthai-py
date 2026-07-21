@@ -21,7 +21,7 @@ TEXTS = [
 
 def test_one_vector_per_text_in_order(backend: MockBackend, client: Client) -> None:
     fixture = backend.register("batch_embed")
-    vectors = client.batch_embed(TEXTS, dimensions=32).vectors()
+    vectors = client.batch_embed(TEXTS, dimensions=32).output()
     expected = [entry["embedding"] for entry in fixture["response"]["data"]]
     assert vectors == expected
     assert all(len(vector) == 32 for vector in vectors)
@@ -41,7 +41,7 @@ def test_out_of_order_response_resorted_by_index(
     by_index = {entry["index"]: entry for entry in fixture["response"]["data"]}
     fixture["response"]["data"] = [by_index[2], by_index[0], by_index[1]]
     backend.respond("POST", EMBEDDING_ENDPOINT, fixture["response"])
-    vectors = client.batch_embed(TEXTS).vectors()
+    vectors = client.batch_embed(TEXTS).output()
     assert vectors == [by_index[i]["embedding"] for i in range(3)]
 
 

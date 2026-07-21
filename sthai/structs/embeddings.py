@@ -123,25 +123,18 @@ class EmbeddingResponse(Struct):
         """Token usage summary; embeddings only consume input tokens."""
         return self.usage_info.summary()
 
-    def output(self) -> list[list[float] | str]:
-        """The embeddings in input order (base64/binary formats are strings)."""
-        return [d.embedding for d in sorted(self.data, key=lambda d: d.index)]
-
-    def vectors(self) -> list[list[float]]:
+    def output(self) -> list[list[float]]:
         """
-        The embeddings in input order as float lists. Raises ResponseError
-        for non-float encoding formats, where the server returns strings.
+        The embeddings in input order as float vectors. Raises ResponseError
+        when the response carries no embeddings, or for non-float encoding
+        formats (where the server returns strings; the raw entries stay
+        available on data).
         """
-        validated: list[list[float]] = []
-        for embedding in self.output():
-            if isinstance(embedding, str):
-                raise ResponseError("expected a float embedding, got an encoded string")
-            validated.append(embedding)
-        return validated
-
-    def vector(self) -> list[float]:
-        """The single float vector from an embed() response."""
-        vectors = self.vectors()
-        if not vectors:
+        if not self.data:
             raise ResponseError("server returned no embedding data")
-        return vectors[0]
+        vectors: list[list[float]] = []
+        for entry in sorted(self.data, key=lambda d: d.index):
+            if isinstance(entry.embedding, str):
+                raise ResponseError("expected a float embedding, got an encoded string")
+            vectors.append(entry.embedding)
+        return vectors

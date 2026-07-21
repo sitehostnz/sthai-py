@@ -81,7 +81,7 @@ def test_usage_summary_defaults_missing_details_to_zero() -> None:
     assert info.summary() == Usage(input_tokens=10)
 
 
-def test_embedding_vectors_sorted_by_index() -> None:
+def test_embedding_output_sorted_by_index() -> None:
     response = EmbeddingResponse(
         id="x",
         data=[
@@ -90,24 +90,23 @@ def test_embedding_vectors_sorted_by_index() -> None:
         ],
         usage_info=UsageInfo(),
     )
-    assert response.vectors() == [[0.1], [0.2]]
-    assert response.vector() == [0.1]
+    assert response.output() == [[0.1], [0.2]]
 
 
-def test_embedding_vectors_reject_encoded_strings() -> None:
+def test_embedding_output_rejects_encoded_strings() -> None:
     response = EmbeddingResponse(
         id="x",
         data=[EmbeddingResponseData(index=0, embedding="bm90IGZsb2F0cw==")],
         usage_info=UsageInfo(),
     )
     with pytest.raises(ResponseError, match="encoded string"):
-        response.vectors()
+        response.output()
 
 
-def test_embedding_vector_on_empty_data_raises() -> None:
+def test_embedding_output_on_empty_data_raises() -> None:
     response = EmbeddingResponse(id="x", data=[], usage_info=UsageInfo())
     with pytest.raises(ResponseError, match="no embedding data"):
-        response.vector()
+        response.output()
 
 
 def test_rerank_usage_is_input_only() -> None:

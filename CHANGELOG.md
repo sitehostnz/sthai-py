@@ -4,14 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [1.2.0] - 2026-07-21
 
-### Added
-
-- `EmbeddingResponse.vectors()` returns the embeddings in input order as validated float lists, and `EmbeddingResponse.vector()` returns the single vector from an `embed()` call. Both raise `sthai.ResponseError` for non-float encoding formats; `vector()` also raises when the response carries no embedding data.
-
 ### Changed
 
-- **Breaking:** `embed()` and `batch_embed()` now return the full `EmbeddingResponse` instead of bare vectors, on both clients. Get the vectors via `vector()` (single) or `vectors()` (batch), and token usage via `usage()` - previously usage on embedding calls was unrecoverable.
+- **Breaking:** `embed()` and `batch_embed()` now return the full `EmbeddingResponse` instead of bare vectors, on both clients. Get the vectors via `output()` (one per input, so `output()[0]` for `embed()`), and token usage via `usage()` - previously usage on embedding calls was unrecoverable.
 - **Breaking:** `rerank()` now returns the full `RerankResponse` instead of a `list[RerankResult]`, on both clients. Get the sorted results via `output()` (or `results`), and token usage via `usage()`.
+- **Breaking:** `EmbeddingResponse.output()` now returns validated float vectors (`list[list[float]]`) and raises `sthai.ResponseError` for non-float encoding formats or when the response carries no embeddings. The raw entries stay available on `data`.
 
 ## [1.1.0] - 2026-07-20
 
