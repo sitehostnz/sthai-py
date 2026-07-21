@@ -111,29 +111,29 @@ If the output is cut off by the token limit, or (rarely, with thinking enabled) 
 
 ### Embeddings
 
-`embed()` turns one input - text, images, or both - into a single vector. The embedding model is instruction-trained: document embedding is the default, and `query=True` switches to the query instruction for search-style lookups. `dimensions=` truncates the vector server-side (Matryoshka - powers of two work best):
+`embed()` turns one input - text, images, or both - into a single vector, returned via `vector()` on the response. The embedding model is instruction-trained: document embedding is the default, and `query=True` switches to the query instruction for search-style lookups. `dimensions=` truncates the vector server-side (Matryoshka - powers of two work best):
 
 ```python
-vector = client.embed("The Beehive is New Zealand's parliament building.")
-query_vector = client.embed("Where does NZ parliament sit?", query=True)
-small = client.embed("Compact vector, please.", dimensions=512)
+vector = client.embed("The Beehive is New Zealand's parliament building.").vector()
+query_vector = client.embed("Where does NZ parliament sit?", query=True).vector()
+small = client.embed("Compact vector, please.", dimensions=512).vector()
 ```
 
-`batch_embed()` embeds many texts in one request, returning one vector per text in order:
+`batch_embed()` embeds many texts in one request; `vectors()` on the response is one vector per text in order:
 
 ```python
 vectors = client.batch_embed([
     "Wellington is the capital of New Zealand.",
     "Auckland is the largest city in New Zealand.",
-])
+]).vectors()
 ```
 
 ### Reranking
 
-`rerank()` scores each document against a query and returns results sorted by relevance, with each result's `index` mapping back to your input list:
+`rerank()` scores each document against a query; `output()` on the response is the results sorted by relevance, with each result's `index` mapping back to your input list:
 
 ```python
-results = client.rerank(
+response = client.rerank(
     "What is the capital of New Zealand?",
     [
         "The capital of New Zealand is Wellington.",
@@ -142,7 +142,7 @@ results = client.rerank(
     ],
     top_n=2,
 )
-for result in results:
+for result in response.output():
     print(result.relevance_score, result.document.text)
 ```
 
@@ -150,12 +150,21 @@ Pass `instruction=` to steer relevance for a specific task; the model applies a 
 
 ### Response helpers
 
-Every response type has `usage()` (input/output/cached token counts) and `output()` (the useful payload). The full struct from the most recent inference call is available via `last_response()`:
+Every inference, embedding and rerank call returns the full response struct, and every response struct has `usage()` (input/output/cached token counts) and `output()` (the useful payload). Embedding responses add `vector()` and `vectors()` for the float vectors themselves:
 
 ```python
 response = client.chat("Hello!")
 print(response.usage().input_tokens, response.usage().output_tokens)
-print(client.last_response().model)
+
+embedded = client.embed("Hello!")
+print(embedded.usage().input_tokens, len(embedded.vector()))
+```
+
+The one exception is `response(response_type=...)`, which returns the parsed value directly; the full struct from the most recent inference call remains available via `last_response()`:
+
+```python
+city = client.response("Describe Wellington.", response_type=CityInfo)
+print(client.last_response().usage().input_tokens)
 ```
 
 ### Sessions

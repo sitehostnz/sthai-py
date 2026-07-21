@@ -124,8 +124,8 @@ async def test_response_struct_parsed_and_schema_sent(
 
 async def test_embed(backend: MockBackend, async_client: AsyncClient) -> None:
     fixture = backend.register("embed_single")
-    vector = await async_client.embed("kia ora")
-    assert vector == fixture["response"]["data"][0]["embedding"]
+    response = await async_client.embed("kia ora")
+    assert response.vector() == fixture["response"]["data"][0]["embedding"]
     assert backend.last_call.path == fixture["endpoint"]
 
 
@@ -139,16 +139,17 @@ async def test_embed_validation_raises_before_any_request(
 
 async def test_batch_embed(backend: MockBackend, async_client: AsyncClient) -> None:
     fixture = backend.register("batch_embed")
-    vectors = await async_client.batch_embed(["first text", "second text"])
-    assert vectors == [entry["embedding"] for entry in fixture["response"]["data"]]
+    response = await async_client.batch_embed(["first text", "second text"])
+    expected = [entry["embedding"] for entry in fixture["response"]["data"]]
+    assert response.vectors() == expected
 
 
 async def test_rerank(backend: MockBackend, async_client: AsyncClient) -> None:
     fixture = backend.register("rerank")
     query = fixture["request"]["query"]
     documents = fixture["request"]["documents"]
-    results = await async_client.rerank(query, documents)
-    scores = [result.relevance_score for result in results]
+    response = await async_client.rerank(query, documents)
+    scores = [result.relevance_score for result in response.output()]
     assert scores == sorted(scores, reverse=True)
     assert backend.last_call.body["query"] == query
 

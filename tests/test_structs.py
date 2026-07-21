@@ -1,7 +1,9 @@
 """Struct-level behaviour: wire encoding, renames, and accessor methods."""
 
 import msgspec
+import pytest
 
+from sthai.exceptions import ResponseError
 from sthai.structs.common import InferenceOutput, Usage
 from sthai.structs.completions import (
     InferenceRequest,
@@ -77,6 +79,35 @@ def test_usage_summary_includes_cached_tokens() -> None:
 def test_usage_summary_defaults_missing_details_to_zero() -> None:
     info = UsageInfo(prompt_tokens=10, total_tokens=10, completion_tokens=None)
     assert info.summary() == Usage(input_tokens=10)
+
+
+def test_embedding_vectors_sorted_by_index() -> None:
+    response = EmbeddingResponse(
+        id="x",
+        data=[
+            EmbeddingResponseData(index=1, embedding=[0.2]),
+            EmbeddingResponseData(index=0, embedding=[0.1]),
+        ],
+        usage_info=UsageInfo(),
+    )
+    assert response.vectors() == [[0.1], [0.2]]
+    assert response.vector() == [0.1]
+
+
+def test_embedding_vectors_reject_encoded_strings() -> None:
+    response = EmbeddingResponse(
+        id="x",
+        data=[EmbeddingResponseData(index=0, embedding="bm90IGZsb2F0cw==")],
+        usage_info=UsageInfo(),
+    )
+    with pytest.raises(ResponseError, match="encoded string"):
+        response.vectors()
+
+
+def test_embedding_vector_on_empty_data_raises() -> None:
+    response = EmbeddingResponse(id="x", data=[], usage_info=UsageInfo())
+    with pytest.raises(ResponseError, match="no embedding data"):
+        response.vector()
 
 
 def test_rerank_usage_is_input_only() -> None:

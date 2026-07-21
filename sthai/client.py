@@ -52,7 +52,6 @@ from sthai.structs.models import ModelCard, ModelList
 from sthai.structs.rerank import (
     RerankRequest,
     RerankResponse,
-    RerankResult,
     ScoreMultiModalParam,
 )
 from sthai.typing import HttpMethod
@@ -171,16 +170,6 @@ def _check_dimensions(model: EmbeddingModel | str, dimensions: int | None) -> No
             f"divisor (e.g. {params.dimensions // 2}, {params.dimensions // 4})",
             stacklevel=4,
         )
-
-
-def _float_embedding(embedding: list[float] | str) -> list[float]:
-    """
-    Ensure a decoded embedding is the float list the client requested (the
-    server returns strings for non-float encoding formats).
-    """
-    if isinstance(embedding, str):
-        raise ResponseError("expected a float embedding, got an encoded string")
-    return embedding
 
 
 def _decode(response: Response, type_: type[T]) -> T:
@@ -545,23 +534,10 @@ class _BaseClient:
         raise_for_status(response)
         return _decode(response, EmbeddingResponse)
 
-    def _extract_single_embedding(self, decoded: EmbeddingResponse) -> list[float]:
-        """The single float vector from an embed() response."""
-        outputs = decoded.output()
-        if not outputs:
-            raise ResponseError("server returned no embedding data")
-        return _float_embedding(outputs[0])
-
-    def _extract_batch_embeddings(
-        self, decoded: EmbeddingResponse
-    ) -> list[list[float]]:
-        """One float vector per input text from a batch_embed() response."""
-        return [_float_embedding(embedding) for embedding in decoded.output()]
-
-    def _finish_rerank(self, response: Response) -> list[RerankResult]:
-        """Decode a rerank response into its result list."""
+    def _finish_rerank(self, response: Response) -> RerankResponse:
+        """Decode a rerank response."""
         raise_for_status(response)
-        return _decode(response, RerankResponse).results
+        return _decode(response, RerankResponse)
 
     def _server_url(self) -> str:
         """The server's base URL."""
@@ -698,9 +674,11 @@ class Client(_BaseClient):
         image_urls: list[str] | None = None,
         image_files: list[Path | bytes] | None = None,
         dimensions: int | None = None,
-    ) -> list[float]:
+    ) -> EmbeddingResponse:
         """
-        Embed a single input (text, images, or both) and return its vector.
+        Embed a single input (text, images, or both) and return the full
+        embedding response; its vector() method is the resulting vector,
+        and usage() reports the token counts.
 
         The instruction-trained model is steered by a default instruction
         from EMBEDDING_PARAMS in sthai.const: the model's document
@@ -721,8 +699,7 @@ class Client(_BaseClient):
             image_files=image_files,
             dimensions=dimensions,
         )
-        decoded = self._embedding_request(body)
-        return self._extract_single_embedding(decoded)
+        return self._embedding_request(body)
 
     def batch_embed(
         self,
@@ -733,10 +710,12 @@ class Client(_BaseClient):
         instruction: str | None = None,
         template: str | None = None,
         dimensions: int | None = None,
-    ) -> list[list[float]]:
+    ) -> EmbeddingResponse:
         """
-        Embed a batch of texts in one request, returning one vector per text
-        in the same order. Text-only; use embed() for multimodal input.
+        Embed a batch of texts in one request and return the full embedding
+        response; its vectors() method is one vector per text in the same
+        order, and usage() reports the token counts. Text-only; use embed()
+        for multimodal input.
 
         Only the plain-input request form batches, and it bypasses the
         server-side chat template, so each text is rendered through a local
@@ -755,8 +734,7 @@ class Client(_BaseClient):
             template=template,
             dimensions=dimensions,
         )
-        decoded = self._embedding_request(body)
-        return self._extract_batch_embeddings(decoded)
+        return self._embedding_request(body)
 
     def _embedding_request(
         self, body: EmbeddingChatRequest | EmbeddingCompletionRequest
@@ -779,11 +757,13 @@ class Client(_BaseClient):
         model: RerankingModel | str = RerankingModel.QWEN_3_VL_8B,
         top_n: int | None = None,
         instruction: str | None = None,
-    ) -> list[RerankResult]:
+    ) -> RerankResponse:
         """
-        Score each document against the query and return the results sorted
-        by relevance score descending, each carrying the document, its
-        relevance_score, and its index in the input documents list.
+        Score each document against the query and return the full rerank
+        response. Its output() method is the results sorted by relevance
+        score descending - each carrying the document, its relevance_score,
+        and its index in the input documents list - and usage() reports the
+        token counts.
 
         All documents are returned unless top_n limits it. The
         instruction-trained model applies its own default instruction; pass

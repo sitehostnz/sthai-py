@@ -20,7 +20,7 @@ DOCUMENTS = [
 
 def test_results_sorted_by_relevance(backend: MockBackend, client: Client) -> None:
     backend.register("rerank")
-    results = client.rerank(QUERY, DOCUMENTS)
+    results = client.rerank(QUERY, DOCUMENTS).output()
     assert len(results) == len(DOCUMENTS)
     assert all(isinstance(result, RerankResult) for result in results)
     scores = [result.relevance_score for result in results]
@@ -28,6 +28,13 @@ def test_results_sorted_by_relevance(backend: MockBackend, client: Client) -> No
     # Each index maps back to the position in the input documents list
     for result in results:
         assert result.document.text == DOCUMENTS[result.index]
+
+
+def test_usage_reports_input_tokens(backend: MockBackend, client: Client) -> None:
+    fixture = backend.register("rerank")
+    usage = client.rerank(QUERY, DOCUMENTS).usage()
+    assert usage.input_tokens == fixture["response"]["usage"]["prompt_tokens"]
+    assert usage.output_tokens == 0
 
 
 def test_minimal_request_body(backend: MockBackend, client: Client) -> None:
@@ -43,7 +50,7 @@ def test_minimal_request_body(backend: MockBackend, client: Client) -> None:
 
 def test_top_n_limits_results(backend: MockBackend, client: Client) -> None:
     backend.register("rerank_top_n")
-    results = client.rerank(QUERY, DOCUMENTS, top_n=2)
+    results = client.rerank(QUERY, DOCUMENTS, top_n=2).output()
     assert len(results) == 2
     assert backend.last_call.body["top_n"] == 2
 
