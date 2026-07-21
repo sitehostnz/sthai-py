@@ -24,7 +24,7 @@ from sthai.structs.embeddings import (
     EmbeddingResponse,
 )
 from sthai.structs.models import ModelCard
-from sthai.structs.rerank import RerankResult, ScoreMultiModalParam
+from sthai.structs.rerank import RerankResponse, ScoreMultiModalParam
 from sthai.typing import HttpMethod
 
 # TypeVar rather than PEP 695 syntax to stay compatible with Python 3.10
@@ -150,9 +150,11 @@ class AsyncClient(_BaseClient):
         image_urls: list[str] | None = None,
         image_files: list[Path | bytes] | None = None,
         dimensions: int | None = None,
-    ) -> list[float]:
+    ) -> EmbeddingResponse:
         """
-        Embed a single input (text, images, or both) and return its vector.
+        Embed a single input (text, images, or both) and return the full
+        embedding response; its vector() method is the resulting vector,
+        and usage() reports the token counts.
 
         The instruction-trained model is steered by a default instruction
         from EMBEDDING_PARAMS in sthai.const: the model's document
@@ -173,8 +175,7 @@ class AsyncClient(_BaseClient):
             image_files=image_files,
             dimensions=dimensions,
         )
-        decoded = await self._embedding_request(body)
-        return self._extract_single_embedding(decoded)
+        return await self._embedding_request(body)
 
     async def batch_embed(
         self,
@@ -185,10 +186,12 @@ class AsyncClient(_BaseClient):
         instruction: str | None = None,
         template: str | None = None,
         dimensions: int | None = None,
-    ) -> list[list[float]]:
+    ) -> EmbeddingResponse:
         """
-        Embed a batch of texts in one request, returning one vector per text
-        in the same order. Text-only; use embed() for multimodal input.
+        Embed a batch of texts in one request and return the full embedding
+        response; its vectors() method is one vector per text in the same
+        order, and usage() reports the token counts. Text-only; use embed()
+        for multimodal input.
 
         Only the plain-input request form batches, and it bypasses the
         server-side chat template, so each text is rendered through a local
@@ -207,8 +210,7 @@ class AsyncClient(_BaseClient):
             template=template,
             dimensions=dimensions,
         )
-        decoded = await self._embedding_request(body)
-        return self._extract_batch_embeddings(decoded)
+        return await self._embedding_request(body)
 
     async def _embedding_request(
         self, body: EmbeddingChatRequest | EmbeddingCompletionRequest
@@ -231,11 +233,13 @@ class AsyncClient(_BaseClient):
         model: RerankingModel | str = RerankingModel.QWEN_3_VL_8B,
         top_n: int | None = None,
         instruction: str | None = None,
-    ) -> list[RerankResult]:
+    ) -> RerankResponse:
         """
-        Score each document against the query and return the results sorted
-        by relevance score descending, each carrying the document, its
-        relevance_score, and its index in the input documents list.
+        Score each document against the query and return the full rerank
+        response. Its output() method is the results sorted by relevance
+        score descending - each carrying the document, its relevance_score,
+        and its index in the input documents list - and usage() reports the
+        token counts.
 
         All documents are returned unless top_n limits it. The
         instruction-trained model applies its own default instruction; pass

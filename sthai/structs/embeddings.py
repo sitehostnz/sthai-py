@@ -26,6 +26,7 @@ from typing import Any, Literal
 
 from msgspec import UNSET, Struct, UnsetType, field
 
+from sthai.exceptions import ResponseError
 from sthai.structs.common import Usage
 from sthai.structs.completions import ChatMessage, UsageInfo
 
@@ -125,3 +126,22 @@ class EmbeddingResponse(Struct):
     def output(self) -> list[list[float] | str]:
         """The embeddings in input order (base64/binary formats are strings)."""
         return [d.embedding for d in sorted(self.data, key=lambda d: d.index)]
+
+    def vectors(self) -> list[list[float]]:
+        """
+        The embeddings in input order as float lists. Raises ResponseError
+        for non-float encoding formats, where the server returns strings.
+        """
+        validated: list[list[float]] = []
+        for embedding in self.output():
+            if isinstance(embedding, str):
+                raise ResponseError("expected a float embedding, got an encoded string")
+            validated.append(embedding)
+        return validated
+
+    def vector(self) -> list[float]:
+        """The single float vector from an embed() response."""
+        vectors = self.vectors()
+        if not vectors:
+            raise ResponseError("server returned no embedding data")
+        return vectors[0]
