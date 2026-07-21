@@ -153,8 +153,8 @@ class AsyncClient(_BaseClient):
     ) -> EmbeddingResponse:
         """
         Embed a single input (text, images, or both) and return the full
-        embedding response; its vector() method is the resulting vector,
-        and usage() reports the token counts.
+        embedding response; output()[0] is the resulting vector, and
+        usage() reports the token counts.
 
         The instruction-trained model is steered by a default instruction
         from EMBEDDING_PARAMS in sthai.const: the model's document
@@ -189,9 +189,9 @@ class AsyncClient(_BaseClient):
     ) -> EmbeddingResponse:
         """
         Embed a batch of texts in one request and return the full embedding
-        response; its vectors() method is one vector per text in the same
-        order, and usage() reports the token counts. Text-only; use embed()
-        for multimodal input.
+        response; output() is one vector per text in the same order, and
+        usage() reports the token counts. Text-only; use embed() for
+        multimodal input.
 
         Only the plain-input request form batches, and it bypasses the
         server-side chat template, so each text is rendered through a local

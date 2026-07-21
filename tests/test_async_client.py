@@ -125,7 +125,7 @@ async def test_response_struct_parsed_and_schema_sent(
 async def test_embed(backend: MockBackend, async_client: AsyncClient) -> None:
     fixture = backend.register("embed_single")
     response = await async_client.embed("kia ora")
-    assert response.vector() == fixture["response"]["data"][0]["embedding"]
+    assert response.output()[0] == fixture["response"]["data"][0]["embedding"]
     assert backend.last_call.path == fixture["endpoint"]
 
 
@@ -141,7 +141,7 @@ async def test_batch_embed(backend: MockBackend, async_client: AsyncClient) -> N
     fixture = backend.register("batch_embed")
     response = await async_client.batch_embed(["first text", "second text"])
     expected = [entry["embedding"] for entry in fixture["response"]["data"]]
-    assert response.vectors() == expected
+    assert response.output() == expected
 
 
 async def test_rerank(backend: MockBackend, async_client: AsyncClient) -> None:
