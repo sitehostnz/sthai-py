@@ -2,6 +2,8 @@ from sthai.typing import StrEnum
 
 
 class InferenceModel(StrEnum):
+    QWEN_3_8_27B = "Qwen/Qwen3.8-27B"
+    # Deprecated: use QWEN_3_8_27B
     QWEN_3_6_27B = "Qwen/Qwen3.6-27B"
 
 

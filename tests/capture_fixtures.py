@@ -20,13 +20,20 @@ from pathlib import Path
 from typing import Any
 
 from msgspec import Struct
-from niquests.exceptions import HTTPError
 from niquests.models import Response
 
 from sthai.client import Client
+from sthai.exceptions import ClientError, ResponseParseError
+from sthai.models import EmbeddingModel, InferenceModel, RerankingModel
 from sthai.typing import HttpMethod
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+# Restricted models must never land in committed fixtures
+PUBLIC_MODELS = {
+    str(model)
+    for model_enum in (InferenceModel, EmbeddingModel, RerankingModel)
+    for model in model_enum
+}
 
 
 class CityInfo(Struct):
@@ -103,6 +110,11 @@ def main() -> None:
     save("health")
 
     client.models()
+    RecordingClient.records[-1]["response"]["data"] = [
+        card
+        for card in RecordingClient.records[-1]["response"]["data"]
+        if card["id"] in PUBLIC_MODELS
+    ]
     save("models")
 
     client.chat("Reply with exactly: kia ora", max_tokens=50, use_history=False)
@@ -136,7 +148,7 @@ def main() -> None:
             response_type=CityInfo,
             max_tokens=10,
         )
-    except ValueError as exc:
+    except ResponseParseError as exc:
         print(f"  (expected truncation error: {exc})")
     save("response_truncated")
 
@@ -170,7 +182,7 @@ def main() -> None:
 
     try:
         client.chat("hello", model="does-not-exist", use_history=False)
-    except HTTPError as exc:
+    except ClientError as exc:
         print(f"  (expected HTTP error: {exc})")
     save("error_bad_model")
 
