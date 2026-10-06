@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2026-10-07
+
+### Added
+
+- `InferenceModel.QWEN_3_8_27B` for Qwen 3.8 27B (`Qwen/Qwen3.8-27B`).
+
+### Changed
+
+- The default inference model for `chat()` and `response()` on both clients is now Qwen 3.8 27B.
+
+### Deprecated
+
+- `InferenceModel.QWEN_3_6_27B` (`Qwen/Qwen3.6-27B`) is deprecated in favour of Qwen 3.8. The platform still accepts it as an alias, but `models()` no longer lists it. See the [models page](https://kb.sitehost.nz/ai-platform/models) for its retirement timeline.
+
 ## [1.2.0] - 2026-07-21
 
 ### Changed
